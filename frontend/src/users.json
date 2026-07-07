@@ -1,0 +1,44 @@
+[
+  {
+    "id": "usr-super-admin",
+    "name": "Admin User",
+    "email": "admin@codesheild.ai",
+    "role": "super_admin",
+    "access": {
+      "main": true,
+      "configuration": true,
+      "admin": true,
+      "canAddRepository": true,
+      "canTriggerBuild": true,
+      "canManageUsers": true
+    }
+  },
+  {
+    "id": "usr-developer",
+    "name": "Dev User",
+    "email": "developer@codesheild.ai",
+    "role": "developer",
+    "access": {
+      "main": true,
+      "configuration": false,
+      "admin": false,
+      "canAddRepository": true,
+      "canTriggerBuild": true,
+      "canManageUsers": false
+    }
+  },
+  {
+    "id": "usr-manager",
+    "name": "Manager User",
+    "email": "manager@codesheild.ai",
+    "role": "manager",
+    "access": {
+      "main": true,
+      "configuration": false,
+      "admin": false,
+      "canAddRepository": false,
+      "canTriggerBuild": false,
+      "canManageUsers": false
+    }
+  }
+]
