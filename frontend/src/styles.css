@@ -2702,3 +2702,26 @@ input[type="file"] {
   background: rgba(248, 113, 113, 0.2);
   color: #f87171;
 }
+/* Skeleton Loader Animation */
+@keyframes skeleton-pulse {
+  0% {
+    background-color: rgba(255, 255, 255, 0.05);
+    color: transparent;
+  }
+  50% {
+    background-color: rgba(255, 255, 255, 0.15);
+    color: transparent;
+  }
+  100% {
+    background-color: rgba(255, 255, 255, 0.05);
+    color: transparent;
+  }
+}
+
+.skeleton-text {
+  display: inline-block;
+  border-radius: 4px;
+  animation: skeleton-pulse 1.5s ease-in-out infinite;
+  user-select: none;
+  min-width: 40px;
+}

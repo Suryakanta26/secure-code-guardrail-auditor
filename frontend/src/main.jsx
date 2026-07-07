@@ -312,6 +312,7 @@ function App() {
   const [summaryError, setSummaryError] = useState('');
   const [finops, setFinops] = useState(defaultFinops);
   const [finopsError, setFinopsError] = useState('');
+  const [finopsLoading, setFinopsLoading] = useState(true);
   const [activeView, setActiveView] = useState('dashboard');
   const [users, setUsers] = useState(seedUsers.map(normalizeUser));
   const [localScanState, setLocalScanState] = useState({});
@@ -352,6 +353,7 @@ function App() {
   const loadFinops = async (token = authToken) => {
     if (!token) return;
 
+    setFinopsLoading(true);
     try {
       const response = await fetch(FINOPS_ENDPOINT, {
         headers: { Authorization: `Bearer ${token}` }
@@ -367,6 +369,8 @@ function App() {
     } catch (error) {
       setFinops(defaultFinops);
       setFinopsError('');
+    } finally {
+      setFinopsLoading(false);
     }
   };
 
@@ -815,7 +819,7 @@ function App() {
               </div>
             </article>
 
-            <FinopsPanel finops={finops} error={finopsError} />
+            <FinopsPanel finops={finops} error={finopsError} loading={finopsLoading} />
 
             <article className="panel findings-table-panel">
               <PanelTitle title="Top Findings" action="View All Findings" />
@@ -951,13 +955,15 @@ const scanStepIcons = {
 };
 const TOTAL_SCAN_STEPS = Object.keys(scanStepIcons).length;
 
-function FinopsPanel({ finops, error }) {
+function FinopsPanel({ finops, error, loading }) {
   const promptTokens = Number(finops.prompt_tokens || 0);
   const completionTokens = Number(finops.completion_tokens || 0);
   const totalTokens = Number(finops.total_tokens || promptTokens + completionTokens);
   const promptWidth = totalTokens ? Math.max(4, Math.round((promptTokens / totalTokens) * 100)) : 0;
   const completionWidth = totalTokens ? Math.max(4, Math.round((completionTokens / totalTokens) * 100)) : 0;
-  const status = finops.status === 'ok' ? 'Live' : finops.status === 'unconfigured' ? 'Setup' : 'Check';
+  
+  let status = finops.status === 'ok' ? 'Live' : finops.status === 'unconfigured' ? 'Setup' : 'Check';
+  if (loading) status = 'Loading...';
 
   return (
     <article className="panel finops-panel">
@@ -966,7 +972,9 @@ function FinopsPanel({ finops, error }) {
         <span className="finops-icon"><Coins size={25} /></span>
         <div>
           <span>Total Spend</span>
-          <strong>{formatCurrency(finops.total_cost)}</strong>
+          <strong className={loading ? 'skeleton-text' : ''}>
+            {loading ? '$0.00' : formatCurrency(finops.total_cost)}
+          </strong>
           <small>{formatCompactNumber(totalTokens)} tokens in {Number(finops.window_days || 30)} days</small>
         </div>
       </div>
@@ -977,19 +985,27 @@ function FinopsPanel({ finops, error }) {
       <div className="finops-grid">
         <div>
           <span>Prompt</span>
-          <strong>{formatCompactNumber(promptTokens)}</strong>
+          <strong className={loading ? 'skeleton-text' : ''}>
+            {loading ? '0' : formatCompactNumber(promptTokens)}
+          </strong>
         </div>
         <div>
           <span>Completion</span>
-          <strong>{formatCompactNumber(completionTokens)}</strong>
+          <strong className={loading ? 'skeleton-text' : ''}>
+            {loading ? '0' : formatCompactNumber(completionTokens)}
+          </strong>
         </div>
         <div>
           <span>LLM Calls</span>
-          <strong>{formatNumber(finops.llm_calls)}</strong>
+          <strong className={loading ? 'skeleton-text' : ''}>
+            {loading ? '0' : formatNumber(finops.llm_calls)}
+          </strong>
         </div>
         <div>
           <span>Latency (P50)</span>
-          <strong>{finops.latency_p50 ? `${finops.latency_p50.toFixed(2)}s` : 'N/A'}</strong>
+          <strong className={loading ? 'skeleton-text' : ''}>
+            {loading ? '0.00s' : (finops.latency_p50 ? `${finops.latency_p50.toFixed(2)}s` : 'N/A')}
+          </strong>
         </div>
       </div>
       <div className="finops-foot">
