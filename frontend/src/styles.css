@@ -889,7 +889,7 @@ mark.failed { background: rgba(239, 68, 68, 0.62); }
 
 .finops-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -2495,4 +2495,119 @@ input[type="file"] {
   .admin-form-panel {
     position: static;
   }
+}
+/* Scatter Plot */
+.scatter-plot-container {
+  padding: 1rem;
+  height: 400px;
+  position: relative;
+}
+
+.scatter-plot {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  background: rgba(12, 19, 31, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+}
+
+.scatter-grid {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+
+.scatter-grid::before {
+  content: '';
+  position: absolute;
+  top: 50%; left: 0; right: 0;
+  border-top: 1px dashed rgba(255, 255, 255, 0.1);
+}
+
+.scatter-grid::after {
+  content: '';
+  position: absolute;
+  top: 0; bottom: 0; left: 50%;
+  border-left: 1px dashed rgba(255, 255, 255, 0.1);
+}
+
+.quadrant {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  color: #94a3b8;
+  opacity: 0.3;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.scatter-axes .y-axis-label {
+  position: absolute;
+  left: -20px;
+  top: 50%;
+  transform: translateY(-50%) rotate(-90deg);
+  font-size: 0.75rem;
+  color: #94a3b8;
+  white-space: nowrap;
+}
+
+.scatter-axes .x-axis-label {
+  position: absolute;
+  bottom: -25px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
+.scatter-dot {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  transform: translate(-50%, 50%);
+  transition: all 0.2s;
+  cursor: pointer;
+  z-index: 10;
+}
+
+.scatter-dot:hover {
+  transform: translate(-50%, 50%) scale(1.5);
+  z-index: 20;
+}
+
+.scatter-dot.critical { background: #f87171; box-shadow: 0 0 10px rgba(248, 113, 113, 0.6); }
+.scatter-dot.high { background: #fb923c; box-shadow: 0 0 8px rgba(251, 146, 60, 0.4); }
+.scatter-dot.medium { background: #facc15; box-shadow: 0 0 6px rgba(250, 204, 21, 0.4); }
+.scatter-dot.low { background: #60a5fa; }
+.scatter-dot.info { background: #a7b5c8; }
+
+.scatter-dot::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%) translateY(-10px);
+  background: #111b27;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  color: #f8fafc;
+  white-space: pre-wrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s, transform 0.2s;
+  min-width: 150px;
+  text-align: left;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+}
+
+.scatter-dot:hover::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(-5px);
 }

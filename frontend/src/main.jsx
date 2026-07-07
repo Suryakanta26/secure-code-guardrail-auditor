@@ -112,7 +112,9 @@ const defaultSummary = {
   high_findings_count: 0,
   compliance_score_count: 0,
   repo: [],
-  recent_scans: []
+  recent_scans: [],
+  compliance_trend: [0,0,0,0,0,0,0],
+  risk_distribution: []
 };
 
 const defaultFinops = {
@@ -682,6 +684,8 @@ function App() {
             <ConfigurationsPage authToken={authToken} />
           ) : activeView === 'audit' && permissions.canManageUsers ? (
             <AuditLogPage authToken={authToken} />
+          ) : activeView === 'compliance_report' ? (
+            <ComplianceReportPage summary={summary} />
           ) : activeView !== 'dashboard' ? (
             <PlaceholderPage title={pageTitle} />
           ) : (
@@ -753,20 +757,35 @@ function App() {
             </article>
 
             <article className="panel trend-panel">
-              <PanelTitle title="Compliance Score Trend" action="View Report" />
+              <PanelTitle title="Compliance Score Trend" action="View Report" onAction={() => setActiveView('compliance_report')} />
               <div className="trend-summary">
                 <strong>{formatPercent(summary.compliance_score_count)}</strong>
                 <span>Overall Score</span>
                 <small>Current repository coverage</small>
               </div>
               <div className="line-chart">
-                <svg viewBox="0 0 480 190" role="img" aria-label="Compliance score trend from May 14 to May 20">
+                <svg viewBox="0 0 480 190" role="img" aria-label="Compliance score trend from historical scans">
                   <path className="grid-line" d="M50 22H460M50 62H460M50 102H460M50 142H460" />
-                  <path className="trend-area" d="M50 122 L105 82 L170 88 L235 62 L300 67 L365 58 L445 48 L445 166 L50 166 Z" />
-                  <polyline className="trend-line" points="50,122 105,82 170,88 235,62 300,67 365,58 445,48" />
-                  {[50, 105, 170, 235, 300, 365, 445].map((x, index) => (
-                    <circle key={x} cx={x} cy={[122, 82, 88, 62, 67, 58, 48][index]} r="4" />
-                  ))}
+                  {(() => {
+                    const trend = summary.compliance_trend || [0,0,0,0,0,0,0];
+                    const xCoords = [50, 105, 170, 235, 300, 365, 445];
+                    const trendPoints = trend.map((score, index) => {
+                      const y = 166 - (score / 100) * (166 - 22);
+                      return `${xCoords[index]},${y}`;
+                    });
+                    const pointsStr = trendPoints.join(' ');
+                    const areaPath = `M${trendPoints[0].replace(',', ' ')} ` + trendPoints.slice(1).map(p => `L${p.replace(',', ' ')}`).join(' ') + ` L445 166 L50 166 Z`;
+                    return (
+                      <>
+                        <path className="trend-area" d={areaPath} />
+                        <polyline className="trend-line" points={pointsStr} />
+                        {trendPoints.map((p, i) => {
+                          const [cx, cy] = p.split(',');
+                          return <circle key={i} cx={cx} cy={cy} r="4" />;
+                        })}
+                      </>
+                    );
+                  })()}
                 </svg>
                 <div className="axis-labels">
                   <span>May 14</span><span>May 15</span><span>May 16</span><span>May 17</span><span>May 18</span><span>May 19</span><span>May 20</span>
@@ -945,6 +964,10 @@ function FinopsPanel({ finops, error }) {
         <div>
           <span>LLM Calls</span>
           <strong>{formatNumber(finops.llm_calls)}</strong>
+        </div>
+        <div>
+          <span>Latency (P50)</span>
+          <strong>{finops.latency_p50 ? `${finops.latency_p50.toFixed(2)}s` : 'N/A'}</strong>
         </div>
       </div>
       <div className="finops-foot">
@@ -2054,6 +2077,87 @@ function PanelTitle({ title, action, onAction }) {
     <div className="panel-title">
       <h2>{title}</h2>
       {action ? <button onClick={onAction}>{action}</button> : null}
+    </div>
+  );
+}
+
+function ComplianceReportPage({ summary }) {
+  const riskDistribution = summary?.risk_distribution || [];
+
+  return (
+    <div className="page-content">
+      <header className="page-header">
+        <div>
+          <h1>Compliance Report</h1>
+          <p>Detailed analysis of compliance posture and risk distribution.</p>
+        </div>
+      </header>
+
+      <div className="dashboard-grid">
+        <article className="panel scatter-panel">
+          <PanelTitle title="Risk vs. Confidence Matrix" />
+          <div className="scatter-plot-container">
+            <div className="scatter-plot">
+              <div className="scatter-grid">
+                <div className="quadrant q-tl">High Risk / Low Conf</div>
+                <div className="quadrant q-tr">High Risk / High Conf</div>
+                <div className="quadrant q-bl">Low Risk / Low Conf</div>
+                <div className="quadrant q-br">Low Risk / High Conf</div>
+              </div>
+              <div className="scatter-axes">
+                <div className="y-axis-label">Risk Score</div>
+                <div className="x-axis-label">Confidence</div>
+              </div>
+              {riskDistribution.map((finding) => (
+                <div 
+                  key={finding.id} 
+                  className={`scatter-dot ${finding.severity}`}
+                  style={{ 
+                    left: `${Math.min(Math.max(finding.confidence * 100, 0), 100)}%`, 
+                    bottom: `${Math.min(Math.max(finding.risk_score * 100, 0), 100)}%` 
+                  }}
+                  data-tooltip={`[${finding.severity.toUpperCase()}] ${finding.category}\nRisk: ${finding.risk_score}\nConf: ${finding.confidence}`}
+                />
+              ))}
+            </div>
+          </div>
+        </article>
+
+        <article className="panel findings-table-panel">
+          <PanelTitle title="Compliance Findings Breakdown" />
+          <div style={{ overflowX: 'auto', marginTop: '1rem' }}>
+            <table>
+              <thead>
+                <tr>
+                  <th style={{ padding: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>Category</th>
+                  <th style={{ padding: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>Severity</th>
+                  <th style={{ padding: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>Confidence</th>
+                  <th style={{ padding: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>Risk Score</th>
+                </tr>
+              </thead>
+              <tbody>
+                {riskDistribution.map((finding) => (
+                  <tr key={finding.id}>
+                    <td style={{ padding: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>{finding.category}</td>
+                    <td style={{ padding: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                      <span className={`severity-pill ${finding.severity}`} style={{ textTransform: 'capitalize' }}>
+                        {finding.severity}
+                      </span>
+                    </td>
+                    <td style={{ padding: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>{Math.round(finding.confidence * 100)}%</td>
+                    <td style={{ padding: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>{Math.round(finding.risk_score * 100)}%</td>
+                  </tr>
+                ))}
+                {riskDistribution.length === 0 && (
+                  <tr>
+                    <td colSpan="4" style={{ padding: '1rem', textAlign: 'center', opacity: 0.5 }}>No recent findings to display.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </article>
+      </div>
     </div>
   );
 }

@@ -108,6 +108,36 @@ def get_summary() -> dict:
 
         recent_scans.append([repo_name, branch, date_str, status, badge, tone])
 
+    all_compliance_scores = []
+    scans_asc = sorted(scans, key=lambda s: s.get("started_at", ""))
+    for scan in scans_asc:
+        report = scan.get("report")
+        if report:
+            statuses = report.get("compliance_status", [])
+            if statuses:
+                pass_count = sum(1 for s in statuses if s["status"] == "pass")
+                all_compliance_scores.append(100 * pass_count / len(statuses))
+    
+    compliance_trend = all_compliance_scores[-7:]
+    if not compliance_trend:
+        compliance_trend = [0] * 7
+    elif len(compliance_trend) < 7:
+        compliance_trend = ([compliance_trend[0]] * (7 - len(compliance_trend))) + compliance_trend
+
+    risk_distribution = []
+    for repo in repos:
+        latest = repo_store.latest_scan_for_repo(repo["id"])
+        if latest and latest.get("report"):
+            for f in latest["report"].get("findings", []):
+                risk_distribution.append({
+                    "id": f.get("id", ""),
+                    "repo": repo.get("github_repo_name") or repo.get("repo_path", "Unknown").split("/")[-1],
+                    "category": f.get("category", "Unknown"),
+                    "severity": f.get("severity", "low"),
+                    "confidence": f.get("confidence", 0.0),
+                    "risk_score": f.get("risk_score", 0.0)
+                })
+
     return {
         "total_repo": len(repos),
         "total_scan": len(scans),
@@ -116,4 +146,6 @@ def get_summary() -> dict:
         "compliance_score_count": compliance_avg,
         "repo": repo_payload,
         "recent_scans": recent_scans,
+        "compliance_trend": compliance_trend,
+        "risk_distribution": risk_distribution,
     }
