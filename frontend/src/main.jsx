@@ -74,14 +74,6 @@ const navGroups = [
 
 const configurationViews = new Set(['compliance', 'owasp', 'standards', 'playbooks', 'configurations']);
 
-const recentScans = [
-  ['ecommerce-service', 'main', 'May 20, 2025 10:30 AM', 'Completed', '12 Critical', 'critical'],
-  ['payment-gateway', 'feature/auth', 'May 20, 2025 09:15 AM', 'Completed', '8 High', 'high'],
-  ['user-service', 'develop', 'May 19, 2025 06:45 PM', 'Completed', '5 Medium', 'medium'],
-  ['inventory-service', 'main', 'May 19, 2025 04:30 PM', 'In Progress', 'Scanning', 'scanning'],
-  ['notification-service', 'main', 'May 18, 2025 11:20 AM', 'Completed', 'No Issues', 'clean']
-];
-
 const severity = [
   ['Critical', 32, '18%', '#f87171'],
   ['High', 78, '43%', '#fb923c'],
@@ -119,7 +111,8 @@ const defaultSummary = {
   critical_findings_count: 0,
   high_findings_count: 0,
   compliance_score_count: 0,
-  repo: []
+  repo: [],
+  recent_scans: []
 };
 
 const defaultFinops = {
@@ -709,10 +702,10 @@ function App() {
 
               <section className="dashboard-grid">
             <article className="panel recent-panel">
-              <PanelTitle title="Recent Scans" action="View All" />
+              <PanelTitle title="Recent Scans" action="View All" onAction={() => setActiveView('scans')} />
               <div className="recent-list">
-                {recentScans.map(([repo, branch, date, status, badge, tone]) => (
-                  <div className="recent-item" key={`${repo}-${branch}`}>
+                {(summary.recent_scans || []).map(([repo, branch, date, status, badge, tone]) => (
+                  <div className="recent-item" key={`${repo}-${branch}-${date}`}>
                     <GitPullRequestArrow size={22} />
                     <div>
                       <strong>{repo} <span>({branch})</span></strong>
@@ -2056,11 +2049,11 @@ function GithubIcon() {
   return <GitPullRequestArrow size={19} />;
 }
 
-function PanelTitle({ title, action }) {
+function PanelTitle({ title, action, onAction }) {
   return (
     <div className="panel-title">
       <h2>{title}</h2>
-      {action ? <button>{action}</button> : null}
+      {action ? <button onClick={onAction}>{action}</button> : null}
     </div>
   );
 }

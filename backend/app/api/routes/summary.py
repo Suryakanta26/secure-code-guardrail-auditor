@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from fastapi import APIRouter
 
 from app.services import repo_store
@@ -52,6 +54,60 @@ def get_summary() -> dict:
 
     compliance_avg = round(sum(compliance_scores) / len(compliance_scores)) if compliance_scores else 0
 
+    recent_scans = []
+    scans_sorted = sorted(scans, key=lambda s: s.get("started_at", ""), reverse=True)[:5]
+    for scan in scans_sorted:
+        repo = next((r for r in repos if r["id"] == scan["repo_id"]), None)
+        if not repo:
+            continue
+        repo_name = repo.get("github_repo_name") or repo.get("repo_path", "Unknown Repo").split("/")[-1]
+        branch = repo.get("github_default_branch") or "main"
+        
+        started_at = scan.get("started_at", "")
+        if started_at:
+            try:
+                dt = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+                date_str = dt.strftime("%b %d, %Y %I:%M %p")
+            except:
+                date_str = started_at
+        else:
+            date_str = "Unknown"
+        
+        status = "Completed" if scan.get("status") == "completed" else "In Progress"
+        if scan.get("status") == "failed":
+            status = "Failed"
+            
+        badge = "No Issues"
+        tone = "clean"
+        
+        report = scan.get("report")
+        if report and report.get("findings"):
+            findings = report["findings"]
+            criticals = sum(1 for f in findings if f["severity"] == "critical")
+            highs = sum(1 for f in findings if f["severity"] == "high")
+            mediums = sum(1 for f in findings if f["severity"] == "medium")
+            
+            if criticals > 0:
+                badge = f"{criticals} Critical"
+                tone = "critical"
+            elif highs > 0:
+                badge = f"{highs} High"
+                tone = "high"
+            elif mediums > 0:
+                badge = f"{mediums} Medium"
+                tone = "medium"
+            else:
+                badge = f"{len(findings)} Findings"
+                tone = "low"
+        elif status == "In Progress":
+            badge = "Scanning"
+            tone = "scanning"
+        elif status == "Failed":
+            badge = "Failed"
+            tone = "critical"
+
+        recent_scans.append([repo_name, branch, date_str, status, badge, tone])
+
     return {
         "total_repo": len(repos),
         "total_scan": len(scans),
@@ -59,4 +115,5 @@ def get_summary() -> dict:
         "high_findings_count": high,
         "compliance_score_count": compliance_avg,
         "repo": repo_payload,
+        "recent_scans": recent_scans,
     }
