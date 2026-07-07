@@ -295,8 +295,11 @@ function formatApiError(result, fallback) {
 
 function App() {
   const [authMode, setAuthMode] = useState('login');
-  const [authUser, setAuthUser] = useState(null);
-  const [authToken, setAuthToken] = useState(null);
+  const [authUser, setAuthUser] = useState(() => {
+    const saved = localStorage.getItem('secure-guard-user');
+    return saved ? JSON.parse(saved) : null;
+  });
+  const [authToken, setAuthToken] = useState(() => localStorage.getItem('secure-guard-token') || null);
   const [authError, setAuthError] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
   const [isScanModalOpen, setIsScanModalOpen] = useState(false);
@@ -313,6 +316,22 @@ function App() {
   const [users, setUsers] = useState(seedUsers.map(normalizeUser));
   const [localScanState, setLocalScanState] = useState({});
   const [theme, setTheme] = useState(() => localStorage.getItem('codesheild-theme') || 'dark');
+
+  useEffect(() => {
+    if (authUser) {
+      localStorage.setItem('secure-guard-user', JSON.stringify(authUser));
+    } else {
+      localStorage.removeItem('secure-guard-user');
+    }
+  }, [authUser]);
+
+  useEffect(() => {
+    if (authToken) {
+      localStorage.setItem('secure-guard-token', authToken);
+    } else {
+      localStorage.removeItem('secure-guard-token');
+    }
+  }, [authToken]);
 
   const loadSummary = async () => {
     try {
