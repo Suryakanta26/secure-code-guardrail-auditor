@@ -114,7 +114,8 @@ const defaultSummary = {
   repo: [],
   recent_scans: [],
   compliance_trend: [0,0,0,0,0,0,0],
-  risk_distribution: []
+  risk_distribution: [],
+  compliance_breakdown: []
 };
 
 const defaultFinops = {
@@ -755,6 +756,8 @@ function App() {
                 ))}
               </div>
             </article>
+
+            <ComplianceScoreCard summary={summary} />
 
             <article className="panel trend-panel">
               <PanelTitle title="Compliance Score Trend" action="View Report" onAction={() => setActiveView('compliance_report')} />
@@ -2078,6 +2081,47 @@ function PanelTitle({ title, action, onAction }) {
       <h2>{title}</h2>
       {action ? <button onClick={onAction}>{action}</button> : null}
     </div>
+  );
+}
+
+function ComplianceScoreCard({ summary }) {
+  const breakdown = summary.compliance_breakdown || [];
+  const score = summary.compliance_score_count || 0;
+  const circumference = 377; // 2 * pi * 60
+  const strokeDashoffset = circumference - (score / 100) * circumference;
+
+  return (
+    <article className="panel compliance-panel">
+      <PanelTitle title="Compliance Frameworks" />
+      <div className="compliance-layout">
+        <div className="compliance-gauge-wrapper">
+          <svg className="compliance-gauge" viewBox="0 0 150 150">
+            <circle cx="75" cy="75" r="60" className="gauge-bg" />
+            <circle 
+              cx="75" 
+              cy="75" 
+              r="60" 
+              className="gauge-fill" 
+              style={{ strokeDashoffset, strokeDasharray: circumference }} 
+            />
+          </svg>
+          <div className="gauge-text">
+            <strong>{score}%</strong>
+          </div>
+        </div>
+        <div className="compliance-breakdown-list">
+          {breakdown.map((fw) => (
+            <div key={fw.framework} className="breakdown-item">
+              <span className="fw-name">{fw.framework}</span>
+              <span className={`fw-status fw-${fw.status}`}>
+                {fw.status.toUpperCase()}
+              </span>
+            </div>
+          ))}
+          {breakdown.length === 0 && <span className="text-muted">No framework data.</span>}
+        </div>
+      </div>
+    </article>
   );
 }
 

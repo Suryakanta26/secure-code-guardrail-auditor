@@ -125,6 +125,8 @@ def get_summary() -> dict:
         compliance_trend = ([compliance_trend[0]] * (7 - len(compliance_trend))) + compliance_trend
 
     risk_distribution = []
+    compliance_breakdown_map = {}
+
     for repo in repos:
         latest = repo_store.latest_scan_for_repo(repo["id"])
         if latest and latest.get("report"):
@@ -137,6 +139,29 @@ def get_summary() -> dict:
                     "confidence": f.get("confidence", 0.0),
                     "risk_score": f.get("risk_score", 0.0)
                 })
+            
+            statuses = latest["report"].get("compliance_status", [])
+            for s in statuses:
+                fw = s.get("framework")
+                if not fw:
+                    continue
+                if fw not in compliance_breakdown_map:
+                    compliance_breakdown_map[fw] = {"framework": fw, "pass": 0, "fail": 0}
+                if s.get("status") == "pass":
+                    compliance_breakdown_map[fw]["pass"] += 1
+                else:
+                    compliance_breakdown_map[fw]["fail"] += 1
+
+    compliance_breakdown = []
+    for fw, counts in compliance_breakdown_map.items():
+        total = counts["pass"] + counts["fail"]
+        status = "pass" if counts["pass"] == total and total > 0 else "fail"
+        compliance_breakdown.append({
+            "framework": fw,
+            "status": status,
+            "pass_count": counts["pass"],
+            "fail_count": counts["fail"]
+        })
 
     return {
         "total_repo": len(repos),
@@ -148,4 +173,5 @@ def get_summary() -> dict:
         "recent_scans": recent_scans,
         "compliance_trend": compliance_trend,
         "risk_distribution": risk_distribution,
+        "compliance_breakdown": compliance_breakdown,
     }
