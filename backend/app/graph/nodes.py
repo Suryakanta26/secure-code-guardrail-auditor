@@ -3,6 +3,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+from app.config import settings
 from app.core.llm import get_llm
 from app.detectors.config_rules import scan_config
 from app.detectors.dependency_scan import scan_dependencies
@@ -47,7 +48,6 @@ _LLM_ELIGIBLE_CATEGORIES = {Category.owasp, Category.compliance, Category.config
 # A single high-severity OWASP finding at default confidence (0.75 * 0.7 * 0.9 = 0.4725) should
 # already qualify on its own; lower-weighted categories (e.g. config_issue) need corroboration
 # from other findings in the same region (the compound_boost above) to cross this bar.
-_LLM_RISK_THRESHOLD = 0.45
 
 _FRAMEWORK_CATEGORY_MAP: dict[str, set[Category]] = {
     "OWASP Top 10": {Category.owasp, Category.logic_flaw},
@@ -165,7 +165,7 @@ def risk_correlation_node(state: GraphState) -> dict:
         if compound_boost > 1.0:
             evidence.append(f"corroborated by {len(region) - 1} other finding(s) in the same region")
 
-        needs_llm = risk_score >= _LLM_RISK_THRESHOLD and finding.category in _LLM_ELIGIBLE_CATEGORIES
+        needs_llm = risk_score >= settings.llm_risk_threshold and finding.category in _LLM_ELIGIBLE_CATEGORIES
 
         scored.append(
             finding.model_copy(
