@@ -303,8 +303,16 @@ function App() {
   const [authError, setAuthError] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
   const [isScanModalOpen, setIsScanModalOpen] = useState(false);
+  const [scanType, setScanType] = useState('local');
   const [repoUrl, setRepoUrl] = useState('');
   const [scanFile, setScanFile] = useState(null);
+  const [mrSearchQuery, setMrSearchQuery] = useState('');
+  const [mrRepos, setMrRepos] = useState([]);
+  const [mrSelectedRepo, setMrSelectedRepo] = useState('');
+  const [mrPulls, setMrPulls] = useState([]);
+  const [mrSelectedPull, setMrSelectedPull] = useState('');
+  const [mrSearching, setMrSearching] = useState(false);
+  const [mrFetchingPulls, setMrFetchingPulls] = useState(false);
   const [scanPage, setScanPage] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [scanError, setScanError] = useState('');
@@ -527,16 +535,24 @@ function App() {
   }
 
   const openScanModal = () => {
+    setScanType('local');
     setScanFile(null);
+    setRepoUrl('');
+    setMrSearchQuery('');
+    setMrRepos([]);
+    setMrSelectedRepo('');
+    setMrPulls([]);
+    setMrSelectedPull('');
     setScanError('');
     setIsScanModalOpen(true);
   };
 
   const startScan = async (event) => {
     event.preventDefault();
-    if (!repoUrl.trim() && !scanFile) return;
+    if (scanType === 'local' && !repoUrl.trim() && !scanFile) return;
+    if (scanType === 'mr' && (!mrSelectedRepo || !mrSelectedPull)) return;
 
-    if (scanFile && !scanFile.name.toLowerCase().endsWith('.zip')) {
+    if (scanType === 'local' && scanFile && !scanFile.name.toLowerCase().endsWith('.zip')) {
       setScanError('Only .zip files are permitted for uploads.');
       return;
     }
@@ -545,33 +561,44 @@ function App() {
     setScanError('');
 
     try {
-      const formData = new FormData();
-      if (scanFile) {
-        formData.append('file', scanFile);
+      let response, result, displaySource;
+
+      if (scanType === 'mr') {
+        const [owner, repo] = mrSelectedRepo.split('/');
+        response = await fetch(`${import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'}/mcp/scan/mr?owner=${owner}&repo=${repo}&pull_number=${mrSelectedPull}`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${authToken}` }
+        });
+        result = await response.json().catch(() => ({}));
+        displaySource = `${owner}/${repo}#PR-${mrSelectedPull}`;
       } else {
-        formData.append('github_url', repoUrl.trim());
+        const formData = new FormData();
+        if (scanFile) {
+          formData.append('file', scanFile);
+        } else {
+          formData.append('github_url', repoUrl.trim());
+        }
+
+        response = await fetch(INGEST_CODE_ENDPOINT, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${authToken}` },
+          body: formData
+        });
+        result = await response.json().catch(() => ({}));
+        displaySource = scanFile ? scanFile.name : repoUrl.trim();
       }
-
-      const response = await fetch(INGEST_CODE_ENDPOINT, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${authToken}` },
-        body: formData
-      });
-
-      const result = await response.json().catch(() => ({}));
 
       if (!response.ok) {
         const message = result.detail || result.message || 'Unable to ingest repository. Please verify the link and try again.';
         throw new Error(Array.isArray(message) ? message.map((item) => item.msg || item.message).join(', ') : message);
       }
 
-      const displaySource = scanFile ? scanFile.name : repoUrl.trim();
       setScanPage({
-        repoUrl: scanFile ? '' : repoUrl.trim(),
-        repoName: scanFile
+        repoUrl: scanType === 'mr' ? '' : (scanFile ? '' : repoUrl.trim()),
+        repoName: scanType === 'mr' ? displaySource : (scanFile
           ? scanFile.name
-          : (repoUrl.trim().replace(/\/$/, '').split('/').slice(-2).join(' / ') || 'New Repository'),
-        sourceType: scanFile ? 'zip' : 'github',
+          : (repoUrl.trim().replace(/\/$/, '').split('/').slice(-2).join(' / ') || 'New Repository')),
+        sourceType: scanType === 'mr' ? 'github-mr' : (scanFile ? 'zip' : 'github'),
         startedAt: new Date().toLocaleString(),
         scanId: result.scan_id || result.id || result.job_id || 'Pending',
         ingestStatus: result.status || result.message || 'Ingestion started'
@@ -885,43 +912,166 @@ function App() {
             <div className="modal-heading">
               <div>
                 <h2 id="new-scan-title">New Repository Scan</h2>
-                <p>Enter a GitHub repository URL or upload source code to start a secure red-team code audit.</p>
+                <p>Start a secure red-team code audit.</p>
               </div>
               <button className="modal-close" aria-label="Close modal" onClick={() => setIsScanModalOpen(false)}>
                 <X size={20} />
               </button>
             </div>
 
+            <div className="scan-type-toggle">
+              <button 
+                className={scanType === 'local' ? 'active' : ''} 
+                onClick={() => setScanType('local')}
+              >
+                Local / URL
+              </button>
+              <button 
+                className={scanType === 'mr' ? 'active' : ''} 
+                onClick={() => setScanType('mr')}
+              >
+                GitHub PR (Agent)
+              </button>
+            </div>
+
             <form onSubmit={startScan}>
-              <label htmlFor="repo-url">GitHub repository link</label>
-              <div className="repo-input-wrap">
-                <GithubIcon />
-                <input
-                  id="repo-url"
-                  type="url"
-                  value={repoUrl}
-                  onChange={(event) => setRepoUrl(event.target.value)}
-                  placeholder="https://github.com/org/repository"
-                  disabled={Boolean(scanFile)}
-                />
-              </div>
-              <label htmlFor="repo-file">Or upload a .zip file</label>
-              <input
-                id="repo-file"
-                type="file"
-                accept=".zip,application/zip,application/x-zip-compressed"
-                onChange={(event) => {
-                  const selectedFile = event.target.files?.[0] || null;
-                  if (selectedFile && !selectedFile.name.toLowerCase().endsWith('.zip')) {
-                    setScanFile(null);
-                    setScanError('Only .zip files are permitted for uploads.');
-                    event.target.value = '';
-                    return;
-                  }
-                  setScanFile(selectedFile);
-                  setScanError('');
-                }}
-              />
+              {scanType === 'local' ? (
+                <>
+                  <label htmlFor="repo-url">GitHub repository link</label>
+                  <div className="repo-input-wrap">
+                    <GithubIcon />
+                    <input
+                      id="repo-url"
+                      type="url"
+                      value={repoUrl}
+                      onChange={(event) => setRepoUrl(event.target.value)}
+                      placeholder="https://github.com/org/repository"
+                      disabled={Boolean(scanFile)}
+                    />
+                  </div>
+                  <label htmlFor="repo-file">Or upload a .zip file</label>
+                  <input
+                    id="repo-file"
+                    type="file"
+                    accept=".zip,application/zip,application/x-zip-compressed"
+                    onChange={(event) => {
+                      const selectedFile = event.target.files?.[0] || null;
+                      if (selectedFile && !selectedFile.name.toLowerCase().endsWith('.zip')) {
+                        setScanFile(null);
+                        setScanError('Only .zip files are permitted for uploads.');
+                        event.target.value = '';
+                        return;
+                      }
+                      setScanFile(selectedFile);
+                      setScanError('');
+                    }}
+                  />
+                </>
+              ) : (
+                <>
+                  <label htmlFor="mr-search">Search GitHub Repositories</label>
+                  <div className="repo-input-wrap" style={{ marginBottom: '0.5rem', gridTemplateColumns: '1fr auto', gap: '8px', paddingRight: '8px' }}>
+                    <input
+                      id="mr-search"
+                      type="text"
+                      value={mrSearchQuery}
+                      onChange={(e) => setMrSearchQuery(e.target.value)}
+                      placeholder="e.g. facebook/react"
+                    />
+                    <button 
+                      type="button" 
+                      className="submit-action"
+                      style={{ height: '34px', padding: '0 16px', borderRadius: '4px', fontSize: '13px', margin: '0' }}
+                      disabled={mrSearching || !mrSearchQuery} 
+                      onClick={async () => {
+                      setMrSearching(true);
+                      setScanError('');
+                      try {
+                        let query = mrSearchQuery.trim();
+                        if (query.includes('github.com/')) {
+                            query = query.split('github.com/')[1];
+                        }
+                        const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'}/mcp/github/search?query=${encodeURIComponent(query)}`, {
+                          headers: { Authorization: `Bearer ${authToken}` }
+                        });
+                        const data = await res.json();
+                        if (!res.ok) throw new Error(data.detail || 'Failed to search');
+                        
+                        let repos = [];
+                        if (data.content && data.content[0] && data.content[0].text) {
+                           try { 
+                             const parsed = JSON.parse(data.content[0].text); 
+                             repos = Array.isArray(parsed) ? parsed : (parsed.items || []);
+                           } catch(e) {}
+                        }
+                        setMrRepos(repos);
+                        setMrSelectedRepo('');
+                        setMrPulls([]);
+                        setMrSelectedPull('');
+                      } catch (err) {
+                        setScanError(err.message);
+                      } finally {
+                        setMrSearching(false);
+                      }
+                    }}>
+                      {mrSearching ? 'Searching...' : 'Search'}
+                    </button>
+                  </div>
+                  
+                  {mrRepos.length > 0 && (
+                    <div style={{marginBottom: '1rem'}}>
+                      <label>Select Repository</label>
+                      <select className="repo-select" value={mrSelectedRepo} onChange={async (e) => {
+                        const repoFullName = e.target.value;
+                        setMrSelectedRepo(repoFullName);
+                        setMrSelectedPull('');
+                        setMrPulls([]);
+                        if (!repoFullName) return;
+                        
+                        setMrFetchingPulls(true);
+                        try {
+                          const [owner, name] = repoFullName.split('/');
+                          const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'}/mcp/github/pulls?owner=${owner}&repo=${name}`, {
+                            headers: { Authorization: `Bearer ${authToken}` }
+                          });
+                          const data = await res.json();
+                          if (!res.ok) throw new Error(data.detail || 'Failed to fetch PRs');
+                          
+                          let pulls = [];
+                          if (data.content && data.content[0] && data.content[0].text) {
+                             try { pulls = JSON.parse(data.content[0].text); } catch(e) {}
+                          }
+                          setMrPulls(pulls);
+                        } catch (err) {
+                          setScanError(err.message);
+                        } finally {
+                          setMrFetchingPulls(false);
+                        }
+                      }}>
+                        <option value="">-- Choose Repo --</option>
+                        {mrRepos.map(r => (
+                          <option key={r.full_name} value={r.full_name}>{r.full_name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {mrSelectedRepo && (
+                    <div style={{marginBottom: '1rem'}}>
+                      <label>Select Pull Request</label>
+                      {mrFetchingPulls ? <div>Loading PRs...</div> : (
+                        <select className="repo-select" value={mrSelectedPull} onChange={e => setMrSelectedPull(e.target.value)}>
+                          <option value="">-- Choose PR --</option>
+                          {mrPulls.map(p => (
+                            <option key={p.number} value={p.number}>#{p.number} - {p.title}</option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+
               <div className="modal-note">
                 <ShieldCheck size={16} />
                 Repository contents will be sent to the ingestion API through the enterprise analysis gateway.
@@ -929,7 +1079,7 @@ function App() {
               {scanError ? <div className="modal-error"><AlertTriangle size={16} /> {scanError}</div> : null}
               <div className="modal-actions">
                 <button type="button" className="cancel-action" onClick={() => setIsScanModalOpen(false)}>Cancel</button>
-                <button type="submit" className="submit-action" disabled={isSubmitting || (!repoUrl.trim() && !scanFile)}>
+                <button type="submit" className="submit-action" disabled={isSubmitting || (scanType === 'local' ? (!repoUrl.trim() && !scanFile) : (!mrSelectedRepo || !mrSelectedPull))}>
                   {isSubmitting ? 'Submitting...' : 'Start Scan'}
                 </button>
               </div>

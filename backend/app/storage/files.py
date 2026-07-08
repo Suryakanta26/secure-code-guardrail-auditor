@@ -1,17 +1,10 @@
 import logging
 from pathlib import Path
 
+from app.core.scannable import _MAX_FILE_BYTES, _MAX_FILES, is_scannable
 from app.schemas.analysis import CodeFile
 
 logger = logging.getLogger(__name__)
-
-_SCANNABLE_EXTENSIONS = {
-    ".py", ".js", ".jsx", ".ts", ".tsx", ".java", ".go", ".rb", ".php",
-    ".cs", ".c", ".cpp", ".h", ".hpp", ".yml", ".yaml", ".json", ".env",
-    ".toml", ".ini", ".cfg", ".sh", ".tf", ".txt",
-}
-_MAX_FILE_BYTES = 200_000
-_MAX_FILES = 300
 
 
 def load_files_from_folder(folder: Path) -> list[CodeFile]:
@@ -28,13 +21,7 @@ def load_files_from_folder(folder: Path) -> list[CodeFile]:
         if not path.is_file():
             continue
 
-        name_lower = path.name.lower()
-        is_scannable = (
-            path.suffix.lower() in _SCANNABLE_EXTENSIONS
-            or name_lower == "dockerfile"
-            or name_lower.startswith(".env")
-        )
-        if not is_scannable:
+        if not is_scannable(path.name):
             continue
 
         try:

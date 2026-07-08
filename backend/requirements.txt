@@ -17,3 +17,4 @@ PyJWT>=2.9.0
 bcrypt>=4.2.0
 truststore>=0.9.2
 fpdf2>=2.7.9
+langchain-mcp-adapters>=0.0.1

@@ -411,3 +411,31 @@ def report_node(state: GraphState) -> dict:
         summary=summary,
     )
     return {"report": report}
+
+# --- MR Reasoning Node ---
+_MR_SYSTEM_PROMPT = """You are a world-class code security auditor reviewing a Pull Request diff.
+Identify critical and high severity security vulnerabilities introduced in the patch.
+Respond ONLY with a JSON array of finding objects matching the LLMFindingsResult schema.
+Each finding must include:
+- category: one of [hardcoded_secret, owasp, logic_flaw, compliance, dependency_vuln, config_issue, coding_standard]
+- severity: one of [critical, high, medium, low, info]
+- title, description, file, line (approximate from patch if possible)
+- recommended_fix: CodeFix object with description and optionally code
+- risk_score: 0.0 to 1.0
+- confidence: 0.0 to 1.0
+"""
+
+def mr_reasoning_node(state: GraphState) -> dict:
+    mr_diff = state.get("mr_diff")
+    if not mr_diff:
+        return {"llm_findings": [], "used_llm": False}
+        
+    llm = get_llm().with_structured_output(LLMFindingsResult)
+    human_content = f"Please audit this Pull Request Diff for security vulnerabilities:\n\n`\n{mr_diff}\n`"
+    
+    try:
+        result: LLMFindingsResult = llm.invoke([("system", _MR_SYSTEM_PROMPT), ("human", human_content)])
+        return {"llm_findings": result.findings, "used_llm": True}
+    except Exception as e:
+        logger.error("MR reasoning LLM failed: %s", e)
+        return {"llm_findings": [], "used_llm": False}
