@@ -552,6 +552,11 @@ h2 {
   background: rgba(57, 217, 138, 0.1);
 }
 
+.failed {
+  color: #ff5f5a;
+  background: rgba(255, 95, 90, 0.1);
+}
+
 .running {
   color: #a69bff;
   background: rgba(139, 124, 255, 0.1);
@@ -1933,6 +1938,11 @@ th {
 .light-theme .scan-mini-steps div.done {
   color: #047857;
   background: rgba(16, 185, 129, 0.12);
+}
+
+.light-theme .failed {
+  color: #dc2626;
+  background: rgba(239, 68, 68, 0.12);
 }
 
 .light-theme .running {

@@ -30,6 +30,11 @@ def apply_fix_route(
     scan_id: str, finding_id: str, current: UserOut = Depends(require_role("developer", "super_admin"))
 ) -> dict:
     scan, repo = _get_scan_and_repo(scan_id)
+    if repo.get("source_type") == "github-mr":
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Cannot automatically apply fixes to Pull Requests. Please manually apply the suggested fix and update your Pull Request."
+        )
     if scan["status"] != "completed" or not scan.get("report"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Scan is not completed yet.")
 

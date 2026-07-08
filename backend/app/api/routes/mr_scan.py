@@ -1,3 +1,4 @@
+import logging
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from app.api.deps import get_current_user
 from app.schemas.auth import UserOut
@@ -5,6 +6,7 @@ from app.services.github_mcp import github_mcp
 from app.services import repo_store
 from app.graph.pipeline import build_pipeline
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/mcp", tags=["mr-scan"])
 
 @router.get("/github/search")
@@ -56,7 +58,24 @@ async def start_mr_scan(
             
             diff_text = ""
             if hasattr(res, "content") and len(res.content) > 0:
-                diff_text = res.content[0].text
+                raw_text = res.content[0].text
+                try:
+                    import json
+                    files_data = json.loads(raw_text)
+                    diff_lines = []
+                    for file_info in files_data:
+                        filename = file_info.get("filename", "unknown")
+                        status = file_info.get("status", "modified")
+                        patch = file_info.get("patch", "")
+                        if patch:
+                            diff_lines.append(f"### File: {filename} ({status})")
+                            diff_lines.append("```diff")
+                            diff_lines.append(patch)
+                            diff_lines.append("```\n")
+                    diff_text = "\n".join(diff_lines)
+                except Exception as parse_exc:
+                    logger.warning("Failed to parse diff JSON: %s", parse_exc)
+                    diff_text = raw_text
             
             repo_store.append_scan_progress(scan_id, agent="Starting MR reasoning pipeline...", status="completed")
             
@@ -95,6 +114,7 @@ async def start_mr_scan(
             
         except Exception as e:
             from datetime import datetime, timezone
+            logger.exception("MR scan failed for scan_id: %s", scan_id)
             repo_store.update_scan(scan_id, status="failed", completed_at=datetime.now(timezone.utc).isoformat())
             repo_store.append_scan_progress(scan_id, agent=f"Failed: {str(e)}", status="failed")
 

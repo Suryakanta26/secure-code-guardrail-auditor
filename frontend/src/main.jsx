@@ -1183,7 +1183,9 @@ function ScanProgressCard({ steps, status }) {
                 <Icon size={27} />
               </div>
               <strong>{step.agent}</strong>
-              <span className="completed"><Check size={13} /> {step.status}</span>
+              <span className={step.status === 'failed' ? 'failed' : 'completed'}>
+                {step.status === 'failed' ? <X size={13} /> : <Check size={13} />} {step.status}
+              </span>
             </div>
           );
         }) : (

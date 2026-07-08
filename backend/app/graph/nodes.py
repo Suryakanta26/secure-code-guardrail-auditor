@@ -413,14 +413,31 @@ def report_node(state: GraphState) -> dict:
     return {"report": report}
 
 # --- MR Reasoning Node ---
+class MRFinding(BaseModel):
+    file: str
+    line: int | None = None
+    title: str
+    description: str
+    severity: Severity
+    category: Category
+    exploit_explanation: str | None = None
+    remediation_patch: str | None = None
+    code_fix: LLMCodeFix | None = None
+    risk_score: float = 0.5
+    confidence: float = 0.8
+
+class MRFindingsResult(BaseModel):
+    findings: list[MRFinding]
+
 _MR_SYSTEM_PROMPT = """You are a world-class code security auditor reviewing a Pull Request diff.
 Identify critical and high severity security vulnerabilities introduced in the patch.
-Respond ONLY with a JSON array of finding objects matching the LLMFindingsResult schema.
+Do NOT flag vulnerabilities that exist in the unchanged context lines, and do NOT flag vulnerabilities that are actively being fixed by the Pull Request.
+Respond ONLY with a JSON array of finding objects matching the MRFindingsResult schema.
 Each finding must include:
 - category: one of [hardcoded_secret, owasp, logic_flaw, compliance, dependency_vuln, config_issue, coding_standard]
 - severity: one of [critical, high, medium, low, info]
 - title, description, file, line (approximate from patch if possible)
-- recommended_fix: CodeFix object with description and optionally code
+- code_fix: LLMCodeFix object with original_snippet and replacement_snippet if you have a safe, exact code fix
 - risk_score: 0.0 to 1.0
 - confidence: 0.0 to 1.0
 """
@@ -430,12 +447,34 @@ def mr_reasoning_node(state: GraphState) -> dict:
     if not mr_diff:
         return {"llm_findings": [], "used_llm": False}
         
-    llm = get_llm().with_structured_output(LLMFindingsResult)
+    llm = get_llm().with_structured_output(MRFindingsResult)
     human_content = f"Please audit this Pull Request Diff for security vulnerabilities:\n\n`\n{mr_diff}\n`"
     
     try:
-        result: LLMFindingsResult = llm.invoke([("system", _MR_SYSTEM_PROMPT), ("human", human_content)])
-        return {"llm_findings": result.findings, "used_llm": True}
+        result: MRFindingsResult = llm.invoke([("system", _MR_SYSTEM_PROMPT), ("human", human_content)])
+        
+        final_findings = []
+        for f in result.findings:
+            fix = CodeFix(original_snippet=f.code_fix.original_snippet, replacement_snippet=f.code_fix.replacement_snippet) if f.code_fix else None
+            final_findings.append(
+                Finding(
+                    file=f.file,
+                    line=f.line,
+                    category=f.category,
+                    severity=f.severity,
+                    title=f.title,
+                    description=f.description,
+                    exploit_explanation=f.exploit_explanation,
+                    remediation_patch=f.remediation_patch,
+                    risk_score=f.risk_score,
+                    confidence=f.confidence,
+                    suggested_fix=fix,
+                    fix_status="suggested" if fix else "none",
+                    needs_llm=True,
+                    evidence=["Found by MR Security Reasoning Agent"]
+                )
+            )
+        return {"llm_findings": final_findings, "used_llm": True}
     except Exception as e:
         logger.error("MR reasoning LLM failed: %s", e)
         return {"llm_findings": [], "used_llm": False}
