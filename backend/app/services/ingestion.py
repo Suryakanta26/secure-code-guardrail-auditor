@@ -35,14 +35,8 @@ def repo_dir(repo_id: str) -> Path:
     return path
 
 
-def ingest_github(repo_id: str, repo_url: str) -> dict:
-    token = settings.github_token or None
-    client = Github(token) if token else Github()
-    repo = client.get_repo(_parse_slug(repo_url))
-    ref = repo.default_branch
+def _fetch_and_write_tree(repo, ref: str, dest: Path) -> int:
     tree = repo.get_git_tree(ref, recursive=True)
-
-    dest = repo_dir(repo_id)
     written = 0
     for entry in tree.tree:
         if written >= _MAX_FILES:
@@ -66,6 +60,17 @@ def ingest_github(repo_id: str, repo_url: str) -> dict:
     logger.info("ingestion: wrote %d file(s) from %s to %s", written, repo.full_name, dest)
     if written == 0:
         raise ValueError("No scannable code files found in the GitHub repository.")
+    return written
+
+def ingest_github(repo_id: str, repo_url: str) -> dict:
+    token = settings.github_token or None
+    client = Github(token) if token else Github()
+    repo = client.get_repo(_parse_slug(repo_url))
+    ref = repo.default_branch
+    
+    dest = repo_dir(repo_id)
+    written = _fetch_and_write_tree(repo, ref, dest)
+    
     return {
         "source": repo_url,
         "source_type": "github",
@@ -75,6 +80,29 @@ def ingest_github(repo_id: str, repo_url: str) -> dict:
         "github_repo_name": repo.name,
         "github_default_branch": ref,
     }
+
+def ingest_github_mr(repo_id: str, owner: str, repo_name: str, pull_number: int) -> dict:
+    token = settings.github_token or None
+    client = Github(token) if token else Github()
+    base_repo = client.get_repo(f"{owner}/{repo_name}")
+    pr = base_repo.get_pull(pull_number)
+    
+    head_repo = pr.head.repo
+    head_ref = pr.head.ref
+    
+    dest = repo_dir(repo_id)
+    written = _fetch_and_write_tree(head_repo, head_ref, dest)
+    
+    return {
+        "source": f"https://github.com/{owner}/{repo_name}/pull/{pull_number}",
+        "source_type": "github-mr",
+        "repo_path": str(dest),
+        "files_written": written,
+        "github_owner": head_repo.owner.login,
+        "github_repo_name": head_repo.name,
+        "github_default_branch": head_ref,
+    }
+
 
 
 def _is_safe_member(name: str) -> bool:

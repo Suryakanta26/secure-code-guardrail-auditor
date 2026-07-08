@@ -13,7 +13,7 @@ class GithubPushError(Exception):
 
 
 def is_github_repo(repo: dict) -> bool:
-    return repo.get("source_type") == "github" and bool(repo.get("github_owner")) and bool(repo.get("github_repo_name"))
+    return repo.get("source_type") in ("github", "github-mr") and bool(repo.get("github_owner")) and bool(repo.get("github_repo_name"))
 
 
 def _branch_name(scan_id: str) -> str:

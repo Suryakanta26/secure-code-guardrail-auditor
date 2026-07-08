@@ -27,6 +27,9 @@ def apply_fix(repo_path: Path, relative_file_path: str, fix: CodeFix) -> None:
     with target.open("r", encoding="utf-8", errors="ignore") as fh:
         content = fh.read()
 
+    if fix.original_snippet == fix.replacement_snippet:
+        raise FixApplyError("The suggested fix is identical to the original code, so no changes will be made.")
+
     occurrences = content.count(fix.original_snippet)
 
     if occurrences == 0:

@@ -265,6 +265,9 @@ def _validated_fix(file_content: str, code_fix: LLMCodeFix | None) -> CodeFix | 
     if file_content.count(code_fix.original_snippet) != 1:
         logger.warning("security reasoning: dropping code_fix, original_snippet is not a unique exact match")
         return None
+    if code_fix.original_snippet == code_fix.replacement_snippet:
+        logger.warning("security reasoning: dropping code_fix, original_snippet is identical to replacement_snippet")
+        return None
     return CodeFix(original_snippet=code_fix.original_snippet, replacement_snippet=code_fix.replacement_snippet)
 
 
@@ -282,10 +285,11 @@ def security_reasoning_node(state: GraphState) -> dict:
     llm = get_llm().with_structured_output(LLMFindingsResult)
     new_findings: list[Finding] = []
     refined_by_id: dict[str, Finding] = {}
+    dropped_ids: set[str] = set()
 
     for path, flagged in findings_by_file.items():
         file = files_by_path.get(path)
-        if file is None:
+        if not file:
             continue
 
         flagged_by_id = {f.id: f for f in flagged}
@@ -304,6 +308,21 @@ def security_reasoning_node(state: GraphState) -> dict:
 
         file_lines = file.content.splitlines()
         for f in result.findings:
+            original = flagged_by_id.get(f.refines_finding_id) if f.refines_finding_id else None
+            if original is None and f.line is not None:
+                # The LLM doesn't always set refines_finding_id even when it's clearly re-describing
+                # a scanner finding on the same line (e.g. restating "String-Built SQL Query" as its
+                # own "SQL Injection Vulnerability" finding) - falling back to an exact same-file/
+                # same-line match against a not-yet-refined flagged finding catches that case too,
+                # so it still merges instead of producing a fix-less duplicate row.
+                original = next((cand for cand in flagged if cand.line == f.line and cand.id not in refined_by_id and cand.id not in dropped_ids), None)
+
+            if f.code_fix and f.code_fix.original_snippet == f.code_fix.replacement_snippet:
+                logger.info("security reasoning: dropping finding '%s' as false positive (identical snippet)", f.title)
+                if original:
+                    dropped_ids.add(original.id)
+                continue
+
             fix = _validated_fix(file.content, f.code_fix)
 
             if fix is not None:
@@ -313,14 +332,6 @@ def security_reasoning_node(state: GraphState) -> dict:
             else:
                 code_snippet = ""
 
-            original = flagged_by_id.get(f.refines_finding_id) if f.refines_finding_id else None
-            if original is None and f.line is not None:
-                # The LLM doesn't always set refines_finding_id even when it's clearly re-describing
-                # a scanner finding on the same line (e.g. restating "String-Built SQL Query" as its
-                # own "SQL Injection Vulnerability" finding) - falling back to an exact same-file/
-                # same-line match against a not-yet-refined flagged finding catches that case too,
-                # so it still merges instead of producing a fix-less duplicate row.
-                original = next((cand for cand in flagged if cand.line == f.line and cand.id not in refined_by_id), None)
             if original is not None:
                 # Same underlying issue as an existing finding: enrich it in place (keeping its
                 # original category/title/severity) instead of spawning a fix-less duplicate row.
@@ -358,7 +369,7 @@ def security_reasoning_node(state: GraphState) -> dict:
                 )
             )
 
-    updated_deterministic = [refined_by_id.get(f.id, f) for f in all_deterministic]
+    updated_deterministic = [refined_by_id.get(f.id, f) for f in all_deterministic if f.id not in dropped_ids]
 
     logger.info(
         "security reasoning agent: %d new finding(s), %d refined in-place, across %d file(s)",
@@ -455,6 +466,10 @@ def mr_reasoning_node(state: GraphState) -> dict:
         
         final_findings = []
         for f in result.findings:
+            if f.code_fix and f.code_fix.original_snippet == f.code_fix.replacement_snippet:
+                logger.info("mr reasoning: dropping finding '%s' as false positive (identical snippet)", f.title)
+                continue
+            
             fix = CodeFix(original_snippet=f.code_fix.original_snippet, replacement_snippet=f.code_fix.replacement_snippet) if f.code_fix else None
             final_findings.append(
                 Finding(

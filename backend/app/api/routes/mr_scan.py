@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from app.api.deps import get_current_user
 from app.schemas.auth import UserOut
 from app.services.github_mcp import github_mcp
-from app.services import repo_store
+from app.services import repo_store, ingestion
 from app.graph.pipeline import build_pipeline
 
 logger = logging.getLogger(__name__)
@@ -33,17 +33,25 @@ async def start_mr_scan(
     background_tasks: BackgroundTasks, 
     current_user: UserOut = Depends(get_current_user)
 ):
-    source = f"https://github.com/{owner}/{repo}/pull/{pull_number}"
-    repo_name = f"{owner}/{repo}#PR-{pull_number}"
-    
+    # Ingest the MR code locally
+    repo_id = ingestion.new_repo_id()
+    try:
+        import asyncio
+        from starlette.concurrency import run_in_threadpool
+        meta = await run_in_threadpool(ingestion.ingest_github_mr, repo_id, owner, repo, pull_number)
+    except Exception as exc:
+        logger.exception("mr-scan: failed to pull MR codebase locally")
+        raise HTTPException(status_code=502, detail=f"Failed to fetch PR codebase: {exc}") from exc
+
     # Create the repo record
     repo_record = repo_store.create_repo(
-        source=source,
-        source_type="github-mr",
-        repo_path=repo_name,
+        source=meta["source"],
+        source_type=meta["source_type"],
+        repo_path=meta["repo_path"],
         owner_user_id=current_user.id,
-        github_owner=owner,
-        github_repo_name=repo
+        github_owner=meta["github_owner"],
+        github_repo_name=meta["github_repo_name"],
+        github_default_branch=meta["github_default_branch"],
     )
     
     # Create the scan record
@@ -82,7 +90,7 @@ async def start_mr_scan(
             pipeline = build_pipeline()
             state = {
                 "scan_id": scan_id,
-                "repo_path": repo_name,
+                "repo_path": repo_record["repo_path"],
                 "repo_id": repo_record["id"],
                 "report": {},
                 "findings": [],
