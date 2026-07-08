@@ -17,15 +17,28 @@ from app.api.routes import (
     scan_actions,
     scans,
     summary,
+    mr_scan,
 )
 from app.config import settings
 from app.core.logging_config import configure_logging
 from app.services import admin_store
+from app.services.github_mcp import github_mcp
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Initialize the Github MCP server singleton
+    try:
+        await github_mcp.initialize()
+    except Exception as e:
+        logger.error(f"Failed to start Github MCP server: {e}")
+    yield
+    await github_mcp.close()
 
 configure_logging()
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="SecureGuard AI Backend")
+app = FastAPI(title="SecureGuard AI Backend", lifespan=lifespan)
 logger.info("SecureGuard AI backend starting up (model=%s)", settings.openai_model)
 
 admin_store.initialize()
@@ -54,3 +67,4 @@ app.include_router(admin_owasp.router)
 app.include_router(admin_playbooks.router)
 app.include_router(admin_configurations.router)
 app.include_router(admin_audit.router)
+app.include_router(mr_scan.router)

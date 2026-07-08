@@ -74,14 +74,6 @@ const navGroups = [
 
 const configurationViews = new Set(['compliance', 'owasp', 'standards', 'playbooks', 'configurations']);
 
-const recentScans = [
-  ['ecommerce-service', 'main', 'May 20, 2025 10:30 AM', 'Completed', '12 Critical', 'critical'],
-  ['payment-gateway', 'feature/auth', 'May 20, 2025 09:15 AM', 'Completed', '8 High', 'high'],
-  ['user-service', 'develop', 'May 19, 2025 06:45 PM', 'Completed', '5 Medium', 'medium'],
-  ['inventory-service', 'main', 'May 19, 2025 04:30 PM', 'In Progress', 'Scanning', 'scanning'],
-  ['notification-service', 'main', 'May 18, 2025 11:20 AM', 'Completed', 'No Issues', 'clean']
-];
-
 const severity = [
   ['Critical', 32, '18%', '#f87171'],
   ['High', 78, '43%', '#fb923c'],
@@ -119,7 +111,11 @@ const defaultSummary = {
   critical_findings_count: 0,
   high_findings_count: 0,
   compliance_score_count: 0,
-  repo: []
+  repo: [],
+  recent_scans: [],
+  compliance_trend: [0,0,0,0,0,0,0],
+  risk_distribution: [],
+  compliance_breakdown: []
 };
 
 const defaultFinops = {
@@ -299,13 +295,24 @@ function formatApiError(result, fallback) {
 
 function App() {
   const [authMode, setAuthMode] = useState('login');
-  const [authUser, setAuthUser] = useState(null);
-  const [authToken, setAuthToken] = useState(null);
+  const [authUser, setAuthUser] = useState(() => {
+    const saved = localStorage.getItem('secure-guard-user');
+    return saved ? JSON.parse(saved) : null;
+  });
+  const [authToken, setAuthToken] = useState(() => localStorage.getItem('secure-guard-token') || null);
   const [authError, setAuthError] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
   const [isScanModalOpen, setIsScanModalOpen] = useState(false);
+  const [scanType, setScanType] = useState('local');
   const [repoUrl, setRepoUrl] = useState('');
   const [scanFile, setScanFile] = useState(null);
+  const [mrSearchQuery, setMrSearchQuery] = useState('');
+  const [mrRepos, setMrRepos] = useState([]);
+  const [mrSelectedRepo, setMrSelectedRepo] = useState('');
+  const [mrPulls, setMrPulls] = useState([]);
+  const [mrSelectedPull, setMrSelectedPull] = useState('');
+  const [mrSearching, setMrSearching] = useState(false);
+  const [mrFetchingPulls, setMrFetchingPulls] = useState(false);
   const [scanPage, setScanPage] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [scanError, setScanError] = useState('');
@@ -313,10 +320,27 @@ function App() {
   const [summaryError, setSummaryError] = useState('');
   const [finops, setFinops] = useState(defaultFinops);
   const [finopsError, setFinopsError] = useState('');
+  const [finopsLoading, setFinopsLoading] = useState(true);
   const [activeView, setActiveView] = useState('dashboard');
   const [users, setUsers] = useState(seedUsers.map(normalizeUser));
   const [localScanState, setLocalScanState] = useState({});
   const [theme, setTheme] = useState(() => localStorage.getItem('codesheild-theme') || 'dark');
+
+  useEffect(() => {
+    if (authUser) {
+      localStorage.setItem('secure-guard-user', JSON.stringify(authUser));
+    } else {
+      localStorage.removeItem('secure-guard-user');
+    }
+  }, [authUser]);
+
+  useEffect(() => {
+    if (authToken) {
+      localStorage.setItem('secure-guard-token', authToken);
+    } else {
+      localStorage.removeItem('secure-guard-token');
+    }
+  }, [authToken]);
 
   const loadSummary = async () => {
     try {
@@ -337,6 +361,7 @@ function App() {
   const loadFinops = async (token = authToken) => {
     if (!token) return;
 
+    setFinopsLoading(true);
     try {
       const response = await fetch(FINOPS_ENDPOINT, {
         headers: { Authorization: `Bearer ${token}` }
@@ -352,6 +377,8 @@ function App() {
     } catch (error) {
       setFinops(defaultFinops);
       setFinopsError('');
+    } finally {
+      setFinopsLoading(false);
     }
   };
 
@@ -508,16 +535,24 @@ function App() {
   }
 
   const openScanModal = () => {
+    setScanType('local');
     setScanFile(null);
+    setRepoUrl('');
+    setMrSearchQuery('');
+    setMrRepos([]);
+    setMrSelectedRepo('');
+    setMrPulls([]);
+    setMrSelectedPull('');
     setScanError('');
     setIsScanModalOpen(true);
   };
 
   const startScan = async (event) => {
     event.preventDefault();
-    if (!repoUrl.trim() && !scanFile) return;
+    if (scanType === 'local' && !repoUrl.trim() && !scanFile) return;
+    if (scanType === 'mr' && (!mrSelectedRepo || !mrSelectedPull)) return;
 
-    if (scanFile && !scanFile.name.toLowerCase().endsWith('.zip')) {
+    if (scanType === 'local' && scanFile && !scanFile.name.toLowerCase().endsWith('.zip')) {
       setScanError('Only .zip files are permitted for uploads.');
       return;
     }
@@ -526,33 +561,44 @@ function App() {
     setScanError('');
 
     try {
-      const formData = new FormData();
-      if (scanFile) {
-        formData.append('file', scanFile);
+      let response, result, displaySource;
+
+      if (scanType === 'mr') {
+        const [owner, repo] = mrSelectedRepo.split('/');
+        response = await fetch(`${import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'}/mcp/scan/mr?owner=${owner}&repo=${repo}&pull_number=${mrSelectedPull}`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${authToken}` }
+        });
+        result = await response.json().catch(() => ({}));
+        displaySource = `${owner}/${repo}#PR-${mrSelectedPull}`;
       } else {
-        formData.append('github_url', repoUrl.trim());
+        const formData = new FormData();
+        if (scanFile) {
+          formData.append('file', scanFile);
+        } else {
+          formData.append('github_url', repoUrl.trim());
+        }
+
+        response = await fetch(INGEST_CODE_ENDPOINT, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${authToken}` },
+          body: formData
+        });
+        result = await response.json().catch(() => ({}));
+        displaySource = scanFile ? scanFile.name : repoUrl.trim();
       }
-
-      const response = await fetch(INGEST_CODE_ENDPOINT, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${authToken}` },
-        body: formData
-      });
-
-      const result = await response.json().catch(() => ({}));
 
       if (!response.ok) {
         const message = result.detail || result.message || 'Unable to ingest repository. Please verify the link and try again.';
         throw new Error(Array.isArray(message) ? message.map((item) => item.msg || item.message).join(', ') : message);
       }
 
-      const displaySource = scanFile ? scanFile.name : repoUrl.trim();
       setScanPage({
-        repoUrl: scanFile ? '' : repoUrl.trim(),
-        repoName: scanFile
+        repoUrl: scanType === 'mr' ? '' : (scanFile ? '' : repoUrl.trim()),
+        repoName: scanType === 'mr' ? displaySource : (scanFile
           ? scanFile.name
-          : (repoUrl.trim().replace(/\/$/, '').split('/').slice(-2).join(' / ') || 'New Repository'),
-        sourceType: scanFile ? 'zip' : 'github',
+          : (repoUrl.trim().replace(/\/$/, '').split('/').slice(-2).join(' / ') || 'New Repository')),
+        sourceType: scanType === 'mr' ? 'github-mr' : (scanFile ? 'zip' : 'github'),
         startedAt: new Date().toLocaleString(),
         scanId: result.scan_id || result.id || result.job_id || 'Pending',
         ingestStatus: result.status || result.message || 'Ingestion started'
@@ -689,6 +735,8 @@ function App() {
             <ConfigurationsPage authToken={authToken} />
           ) : activeView === 'audit' && permissions.canManageUsers ? (
             <AuditLogPage authToken={authToken} />
+          ) : activeView === 'compliance_report' ? (
+            <ComplianceReportPage summary={summary} />
           ) : activeView !== 'dashboard' ? (
             <PlaceholderPage title={pageTitle} />
           ) : (
@@ -709,10 +757,10 @@ function App() {
 
               <section className="dashboard-grid">
             <article className="panel recent-panel">
-              <PanelTitle title="Recent Scans" action="View All" />
+              <PanelTitle title="Recent Scans" action="View All" onAction={() => setActiveView('scans')} />
               <div className="recent-list">
-                {recentScans.map(([repo, branch, date, status, badge, tone]) => (
-                  <div className="recent-item" key={`${repo}-${branch}`}>
+                {(summary.recent_scans || []).map(([repo, branch, date, status, badge, tone]) => (
+                  <div className="recent-item" key={`${repo}-${branch}-${date}`}>
                     <GitPullRequestArrow size={22} />
                     <div>
                       <strong>{repo} <span>({branch})</span></strong>
@@ -759,21 +807,38 @@ function App() {
               </div>
             </article>
 
+            <ComplianceScoreCard summary={summary} />
+
             <article className="panel trend-panel">
-              <PanelTitle title="Compliance Score Trend" action="View Report" />
+              <PanelTitle title="Compliance Score Trend" action="View Report" onAction={() => setActiveView('compliance_report')} />
               <div className="trend-summary">
                 <strong>{formatPercent(summary.compliance_score_count)}</strong>
                 <span>Overall Score</span>
                 <small>Current repository coverage</small>
               </div>
               <div className="line-chart">
-                <svg viewBox="0 0 480 190" role="img" aria-label="Compliance score trend from May 14 to May 20">
+                <svg viewBox="0 0 480 190" role="img" aria-label="Compliance score trend from historical scans">
                   <path className="grid-line" d="M50 22H460M50 62H460M50 102H460M50 142H460" />
-                  <path className="trend-area" d="M50 122 L105 82 L170 88 L235 62 L300 67 L365 58 L445 48 L445 166 L50 166 Z" />
-                  <polyline className="trend-line" points="50,122 105,82 170,88 235,62 300,67 365,58 445,48" />
-                  {[50, 105, 170, 235, 300, 365, 445].map((x, index) => (
-                    <circle key={x} cx={x} cy={[122, 82, 88, 62, 67, 58, 48][index]} r="4" />
-                  ))}
+                  {(() => {
+                    const trend = summary.compliance_trend || [0,0,0,0,0,0,0];
+                    const xCoords = [50, 105, 170, 235, 300, 365, 445];
+                    const trendPoints = trend.map((score, index) => {
+                      const y = 166 - (score / 100) * (166 - 22);
+                      return `${xCoords[index]},${y}`;
+                    });
+                    const pointsStr = trendPoints.join(' ');
+                    const areaPath = `M${trendPoints[0].replace(',', ' ')} ` + trendPoints.slice(1).map(p => `L${p.replace(',', ' ')}`).join(' ') + ` L445 166 L50 166 Z`;
+                    return (
+                      <>
+                        <path className="trend-area" d={areaPath} />
+                        <polyline className="trend-line" points={pointsStr} />
+                        {trendPoints.map((p, i) => {
+                          const [cx, cy] = p.split(',');
+                          return <circle key={i} cx={cx} cy={cy} r="4" />;
+                        })}
+                      </>
+                    );
+                  })()}
                 </svg>
                 <div className="axis-labels">
                   <span>May 14</span><span>May 15</span><span>May 16</span><span>May 17</span><span>May 18</span><span>May 19</span><span>May 20</span>
@@ -781,7 +846,7 @@ function App() {
               </div>
             </article>
 
-            <FinopsPanel finops={finops} error={finopsError} />
+            <FinopsPanel finops={finops} error={finopsError} loading={finopsLoading} />
 
             <article className="panel findings-table-panel">
               <PanelTitle title="Top Findings" action="View All Findings" />
@@ -847,43 +912,166 @@ function App() {
             <div className="modal-heading">
               <div>
                 <h2 id="new-scan-title">New Repository Scan</h2>
-                <p>Enter a GitHub repository URL or upload source code to start a secure red-team code audit.</p>
+                <p>Start a secure red-team code audit.</p>
               </div>
               <button className="modal-close" aria-label="Close modal" onClick={() => setIsScanModalOpen(false)}>
                 <X size={20} />
               </button>
             </div>
 
+            <div className="scan-type-toggle">
+              <button 
+                className={scanType === 'local' ? 'active' : ''} 
+                onClick={() => setScanType('local')}
+              >
+                Local / URL
+              </button>
+              <button 
+                className={scanType === 'mr' ? 'active' : ''} 
+                onClick={() => setScanType('mr')}
+              >
+                GitHub PR (Agent)
+              </button>
+            </div>
+
             <form onSubmit={startScan}>
-              <label htmlFor="repo-url">GitHub repository link</label>
-              <div className="repo-input-wrap">
-                <GithubIcon />
-                <input
-                  id="repo-url"
-                  type="url"
-                  value={repoUrl}
-                  onChange={(event) => setRepoUrl(event.target.value)}
-                  placeholder="https://github.com/org/repository"
-                  disabled={Boolean(scanFile)}
-                />
-              </div>
-              <label htmlFor="repo-file">Or upload a .zip file</label>
-              <input
-                id="repo-file"
-                type="file"
-                accept=".zip,application/zip,application/x-zip-compressed"
-                onChange={(event) => {
-                  const selectedFile = event.target.files?.[0] || null;
-                  if (selectedFile && !selectedFile.name.toLowerCase().endsWith('.zip')) {
-                    setScanFile(null);
-                    setScanError('Only .zip files are permitted for uploads.');
-                    event.target.value = '';
-                    return;
-                  }
-                  setScanFile(selectedFile);
-                  setScanError('');
-                }}
-              />
+              {scanType === 'local' ? (
+                <>
+                  <label htmlFor="repo-url">GitHub repository link</label>
+                  <div className="repo-input-wrap">
+                    <GithubIcon />
+                    <input
+                      id="repo-url"
+                      type="url"
+                      value={repoUrl}
+                      onChange={(event) => setRepoUrl(event.target.value)}
+                      placeholder="https://github.com/org/repository"
+                      disabled={Boolean(scanFile)}
+                    />
+                  </div>
+                  <label htmlFor="repo-file">Or upload a .zip file</label>
+                  <input
+                    id="repo-file"
+                    type="file"
+                    accept=".zip,application/zip,application/x-zip-compressed"
+                    onChange={(event) => {
+                      const selectedFile = event.target.files?.[0] || null;
+                      if (selectedFile && !selectedFile.name.toLowerCase().endsWith('.zip')) {
+                        setScanFile(null);
+                        setScanError('Only .zip files are permitted for uploads.');
+                        event.target.value = '';
+                        return;
+                      }
+                      setScanFile(selectedFile);
+                      setScanError('');
+                    }}
+                  />
+                </>
+              ) : (
+                <>
+                  <label htmlFor="mr-search">Search GitHub Repositories</label>
+                  <div className="repo-input-wrap" style={{ marginBottom: '0.5rem', gridTemplateColumns: '1fr auto', gap: '8px', paddingRight: '8px' }}>
+                    <input
+                      id="mr-search"
+                      type="text"
+                      value={mrSearchQuery}
+                      onChange={(e) => setMrSearchQuery(e.target.value)}
+                      placeholder="e.g. facebook/react"
+                    />
+                    <button 
+                      type="button" 
+                      className="submit-action"
+                      style={{ height: '34px', padding: '0 16px', borderRadius: '4px', fontSize: '13px', margin: '0' }}
+                      disabled={mrSearching || !mrSearchQuery} 
+                      onClick={async () => {
+                      setMrSearching(true);
+                      setScanError('');
+                      try {
+                        let query = mrSearchQuery.trim();
+                        if (query.includes('github.com/')) {
+                            query = query.split('github.com/')[1];
+                        }
+                        const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'}/mcp/github/search?query=${encodeURIComponent(query)}`, {
+                          headers: { Authorization: `Bearer ${authToken}` }
+                        });
+                        const data = await res.json();
+                        if (!res.ok) throw new Error(data.detail || 'Failed to search');
+                        
+                        let repos = [];
+                        if (data.content && data.content[0] && data.content[0].text) {
+                           try { 
+                             const parsed = JSON.parse(data.content[0].text); 
+                             repos = Array.isArray(parsed) ? parsed : (parsed.items || []);
+                           } catch(e) {}
+                        }
+                        setMrRepos(repos);
+                        setMrSelectedRepo('');
+                        setMrPulls([]);
+                        setMrSelectedPull('');
+                      } catch (err) {
+                        setScanError(err.message);
+                      } finally {
+                        setMrSearching(false);
+                      }
+                    }}>
+                      {mrSearching ? 'Searching...' : 'Search'}
+                    </button>
+                  </div>
+                  
+                  {mrRepos.length > 0 && (
+                    <div style={{marginBottom: '1rem'}}>
+                      <label>Select Repository</label>
+                      <select className="repo-select" value={mrSelectedRepo} onChange={async (e) => {
+                        const repoFullName = e.target.value;
+                        setMrSelectedRepo(repoFullName);
+                        setMrSelectedPull('');
+                        setMrPulls([]);
+                        if (!repoFullName) return;
+                        
+                        setMrFetchingPulls(true);
+                        try {
+                          const [owner, name] = repoFullName.split('/');
+                          const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'}/mcp/github/pulls?owner=${owner}&repo=${name}`, {
+                            headers: { Authorization: `Bearer ${authToken}` }
+                          });
+                          const data = await res.json();
+                          if (!res.ok) throw new Error(data.detail || 'Failed to fetch PRs');
+                          
+                          let pulls = [];
+                          if (data.content && data.content[0] && data.content[0].text) {
+                             try { pulls = JSON.parse(data.content[0].text); } catch(e) {}
+                          }
+                          setMrPulls(pulls);
+                        } catch (err) {
+                          setScanError(err.message);
+                        } finally {
+                          setMrFetchingPulls(false);
+                        }
+                      }}>
+                        <option value="">-- Choose Repo --</option>
+                        {mrRepos.map(r => (
+                          <option key={r.full_name} value={r.full_name}>{r.full_name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {mrSelectedRepo && (
+                    <div style={{marginBottom: '1rem'}}>
+                      <label>Select Pull Request</label>
+                      {mrFetchingPulls ? <div>Loading PRs...</div> : (
+                        <select className="repo-select" value={mrSelectedPull} onChange={e => setMrSelectedPull(e.target.value)}>
+                          <option value="">-- Choose PR --</option>
+                          {mrPulls.map(p => (
+                            <option key={p.number} value={p.number}>#{p.number} - {p.title}</option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+
               <div className="modal-note">
                 <ShieldCheck size={16} />
                 Repository contents will be sent to the ingestion API through the enterprise analysis gateway.
@@ -891,7 +1079,7 @@ function App() {
               {scanError ? <div className="modal-error"><AlertTriangle size={16} /> {scanError}</div> : null}
               <div className="modal-actions">
                 <button type="button" className="cancel-action" onClick={() => setIsScanModalOpen(false)}>Cancel</button>
-                <button type="submit" className="submit-action" disabled={isSubmitting || (!repoUrl.trim() && !scanFile)}>
+                <button type="submit" className="submit-action" disabled={isSubmitting || (scanType === 'local' ? (!repoUrl.trim() && !scanFile) : (!mrSelectedRepo || !mrSelectedPull))}>
                   {isSubmitting ? 'Submitting...' : 'Start Scan'}
                 </button>
               </div>
@@ -917,13 +1105,15 @@ const scanStepIcons = {
 };
 const TOTAL_SCAN_STEPS = Object.keys(scanStepIcons).length;
 
-function FinopsPanel({ finops, error }) {
+function FinopsPanel({ finops, error, loading }) {
   const promptTokens = Number(finops.prompt_tokens || 0);
   const completionTokens = Number(finops.completion_tokens || 0);
   const totalTokens = Number(finops.total_tokens || promptTokens + completionTokens);
   const promptWidth = totalTokens ? Math.max(4, Math.round((promptTokens / totalTokens) * 100)) : 0;
   const completionWidth = totalTokens ? Math.max(4, Math.round((completionTokens / totalTokens) * 100)) : 0;
-  const status = finops.status === 'ok' ? 'Live' : finops.status === 'unconfigured' ? 'Setup' : 'Check';
+  
+  let status = finops.status === 'ok' ? 'Live' : finops.status === 'unconfigured' ? 'Setup' : 'Check';
+  if (loading) status = 'Loading...';
 
   return (
     <article className="panel finops-panel">
@@ -932,7 +1122,9 @@ function FinopsPanel({ finops, error }) {
         <span className="finops-icon"><Coins size={25} /></span>
         <div>
           <span>Total Spend</span>
-          <strong>{formatCurrency(finops.total_cost)}</strong>
+          <strong className={loading ? 'skeleton-text' : ''}>
+            {loading ? '$0.00' : formatCurrency(finops.total_cost)}
+          </strong>
           <small>{formatCompactNumber(totalTokens)} tokens in {Number(finops.window_days || 30)} days</small>
         </div>
       </div>
@@ -943,15 +1135,27 @@ function FinopsPanel({ finops, error }) {
       <div className="finops-grid">
         <div>
           <span>Prompt</span>
-          <strong>{formatCompactNumber(promptTokens)}</strong>
+          <strong className={loading ? 'skeleton-text' : ''}>
+            {loading ? '0' : formatCompactNumber(promptTokens)}
+          </strong>
         </div>
         <div>
           <span>Completion</span>
-          <strong>{formatCompactNumber(completionTokens)}</strong>
+          <strong className={loading ? 'skeleton-text' : ''}>
+            {loading ? '0' : formatCompactNumber(completionTokens)}
+          </strong>
         </div>
         <div>
           <span>LLM Calls</span>
-          <strong>{formatNumber(finops.llm_calls)}</strong>
+          <strong className={loading ? 'skeleton-text' : ''}>
+            {loading ? '0' : formatNumber(finops.llm_calls)}
+          </strong>
+        </div>
+        <div>
+          <span>Latency (P50)</span>
+          <strong className={loading ? 'skeleton-text' : ''}>
+            {loading ? '0.00s' : (finops.latency_p50 ? `${finops.latency_p50.toFixed(2)}s` : 'N/A')}
+          </strong>
         </div>
       </div>
       <div className="finops-foot">
@@ -979,7 +1183,9 @@ function ScanProgressCard({ steps, status }) {
                 <Icon size={27} />
               </div>
               <strong>{step.agent}</strong>
-              <span className="completed"><Check size={13} /> {step.status}</span>
+              <span className={step.status === 'failed' ? 'failed' : 'completed'}>
+                {step.status === 'failed' ? <X size={13} /> : <Check size={13} />} {step.status}
+              </span>
             </div>
           );
         }) : (
@@ -2056,11 +2262,133 @@ function GithubIcon() {
   return <GitPullRequestArrow size={19} />;
 }
 
-function PanelTitle({ title, action }) {
+function PanelTitle({ title, action, onAction }) {
   return (
     <div className="panel-title">
       <h2>{title}</h2>
-      {action ? <button>{action}</button> : null}
+      {action ? <button onClick={onAction}>{action}</button> : null}
+    </div>
+  );
+}
+
+function ComplianceScoreCard({ summary }) {
+  const breakdown = summary.compliance_breakdown || [];
+  const score = summary.compliance_score_count || 0;
+  const circumference = 377; // 2 * pi * 60
+  const strokeDashoffset = circumference - (score / 100) * circumference;
+
+  return (
+    <article className="panel compliance-panel">
+      <PanelTitle title="Compliance Frameworks" />
+      <div className="compliance-layout">
+        <div className="compliance-gauge-wrapper">
+          <svg className="compliance-gauge" viewBox="0 0 150 150">
+            <circle cx="75" cy="75" r="60" className="gauge-bg" />
+            <circle 
+              cx="75" 
+              cy="75" 
+              r="60" 
+              className="gauge-fill" 
+              style={{ strokeDashoffset, strokeDasharray: circumference }} 
+            />
+          </svg>
+          <div className="gauge-text">
+            <strong>{score}%</strong>
+          </div>
+        </div>
+        <div className="compliance-breakdown-list">
+          {breakdown.map((fw) => (
+            <div key={fw.framework} className="breakdown-item">
+              <span className="fw-name">{fw.framework}</span>
+              <span className={`fw-status fw-${fw.status}`}>
+                {fw.status.toUpperCase()}
+              </span>
+            </div>
+          ))}
+          {breakdown.length === 0 && <span className="text-muted">No framework data.</span>}
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function ComplianceReportPage({ summary }) {
+  const riskDistribution = summary?.risk_distribution || [];
+
+  return (
+    <div className="page-content">
+      <header className="page-header">
+        <div>
+          <h1>Compliance Report</h1>
+          <p>Detailed analysis of compliance posture and risk distribution.</p>
+        </div>
+      </header>
+
+      <div className="dashboard-grid">
+        <article className="panel scatter-panel">
+          <PanelTitle title="Risk vs. Confidence Matrix" />
+          <div className="scatter-plot-container">
+            <div className="scatter-plot">
+              <div className="scatter-grid">
+                <div className="quadrant q-tl">High Risk / Low Conf</div>
+                <div className="quadrant q-tr">High Risk / High Conf</div>
+                <div className="quadrant q-bl">Low Risk / Low Conf</div>
+                <div className="quadrant q-br">Low Risk / High Conf</div>
+              </div>
+              <div className="scatter-axes">
+                <div className="y-axis-label">Risk Score</div>
+                <div className="x-axis-label">Confidence</div>
+              </div>
+              {riskDistribution.map((finding) => (
+                <div 
+                  key={finding.id} 
+                  className={`scatter-dot ${finding.severity}`}
+                  style={{ 
+                    left: `${Math.min(Math.max(finding.confidence * 100, 0), 100)}%`, 
+                    bottom: `${Math.min(Math.max(finding.risk_score * 100, 0), 100)}%` 
+                  }}
+                  data-tooltip={`[${finding.severity.toUpperCase()}] ${finding.category}\nRisk: ${finding.risk_score}\nConf: ${finding.confidence}`}
+                />
+              ))}
+            </div>
+          </div>
+        </article>
+
+        <article className="panel findings-table-panel">
+          <PanelTitle title="Compliance Findings Breakdown" />
+          <div style={{ overflowX: 'auto', marginTop: '1rem' }}>
+            <table>
+              <thead>
+                <tr>
+                  <th style={{ padding: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>Category</th>
+                  <th style={{ padding: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>Severity</th>
+                  <th style={{ padding: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>Confidence</th>
+                  <th style={{ padding: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>Risk Score</th>
+                </tr>
+              </thead>
+              <tbody>
+                {riskDistribution.map((finding) => (
+                  <tr key={finding.id}>
+                    <td style={{ padding: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>{finding.category}</td>
+                    <td style={{ padding: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                      <span className={`severity-pill ${finding.severity}`} style={{ textTransform: 'capitalize' }}>
+                        {finding.severity}
+                      </span>
+                    </td>
+                    <td style={{ padding: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>{Math.round(finding.confidence * 100)}%</td>
+                    <td style={{ padding: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>{Math.round(finding.risk_score * 100)}%</td>
+                  </tr>
+                ))}
+                {riskDistribution.length === 0 && (
+                  <tr>
+                    <td colSpan="4" style={{ padding: '1rem', textAlign: 'center', opacity: 0.5 }}>No recent findings to display.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </article>
+      </div>
     </div>
   );
 }

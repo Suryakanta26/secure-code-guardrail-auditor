@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     jwt_secret: str = "change-me"
     jwt_expiry_minutes: int = 720
     data_dir: str = "./data"
+    llm_input_cost_per_million: float = 0.150
+    llm_output_cost_per_million: float = 0.600
+    llm_risk_threshold: float = 0.45
 
     @property
     def cors_origin_list(self) -> list[str]:

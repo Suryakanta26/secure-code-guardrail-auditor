@@ -3,6 +3,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+from app.config import settings
 from app.core.llm import get_llm
 from app.detectors.config_rules import scan_config
 from app.detectors.dependency_scan import scan_dependencies
@@ -47,7 +48,6 @@ _LLM_ELIGIBLE_CATEGORIES = {Category.owasp, Category.compliance, Category.config
 # A single high-severity OWASP finding at default confidence (0.75 * 0.7 * 0.9 = 0.4725) should
 # already qualify on its own; lower-weighted categories (e.g. config_issue) need corroboration
 # from other findings in the same region (the compound_boost above) to cross this bar.
-_LLM_RISK_THRESHOLD = 0.45
 
 _FRAMEWORK_CATEGORY_MAP: dict[str, set[Category]] = {
     "OWASP Top 10": {Category.owasp, Category.logic_flaw},
@@ -165,7 +165,7 @@ def risk_correlation_node(state: GraphState) -> dict:
         if compound_boost > 1.0:
             evidence.append(f"corroborated by {len(region) - 1} other finding(s) in the same region")
 
-        needs_llm = risk_score >= _LLM_RISK_THRESHOLD and finding.category in _LLM_ELIGIBLE_CATEGORIES
+        needs_llm = risk_score >= settings.llm_risk_threshold and finding.category in _LLM_ELIGIBLE_CATEGORIES
 
         scored.append(
             finding.model_copy(
@@ -265,6 +265,9 @@ def _validated_fix(file_content: str, code_fix: LLMCodeFix | None) -> CodeFix | 
     if file_content.count(code_fix.original_snippet) != 1:
         logger.warning("security reasoning: dropping code_fix, original_snippet is not a unique exact match")
         return None
+    if code_fix.original_snippet == code_fix.replacement_snippet:
+        logger.warning("security reasoning: dropping code_fix, original_snippet is identical to replacement_snippet")
+        return None
     return CodeFix(original_snippet=code_fix.original_snippet, replacement_snippet=code_fix.replacement_snippet)
 
 
@@ -282,10 +285,11 @@ def security_reasoning_node(state: GraphState) -> dict:
     llm = get_llm().with_structured_output(LLMFindingsResult)
     new_findings: list[Finding] = []
     refined_by_id: dict[str, Finding] = {}
+    dropped_ids: set[str] = set()
 
     for path, flagged in findings_by_file.items():
         file = files_by_path.get(path)
-        if file is None:
+        if not file:
             continue
 
         flagged_by_id = {f.id: f for f in flagged}
@@ -304,6 +308,21 @@ def security_reasoning_node(state: GraphState) -> dict:
 
         file_lines = file.content.splitlines()
         for f in result.findings:
+            original = flagged_by_id.get(f.refines_finding_id) if f.refines_finding_id else None
+            if original is None and f.line is not None:
+                # The LLM doesn't always set refines_finding_id even when it's clearly re-describing
+                # a scanner finding on the same line (e.g. restating "String-Built SQL Query" as its
+                # own "SQL Injection Vulnerability" finding) - falling back to an exact same-file/
+                # same-line match against a not-yet-refined flagged finding catches that case too,
+                # so it still merges instead of producing a fix-less duplicate row.
+                original = next((cand for cand in flagged if cand.line == f.line and cand.id not in refined_by_id and cand.id not in dropped_ids), None)
+
+            if f.code_fix and f.code_fix.original_snippet == f.code_fix.replacement_snippet:
+                logger.info("security reasoning: dropping finding '%s' as false positive (identical snippet)", f.title)
+                if original:
+                    dropped_ids.add(original.id)
+                continue
+
             fix = _validated_fix(file.content, f.code_fix)
 
             if fix is not None:
@@ -313,14 +332,6 @@ def security_reasoning_node(state: GraphState) -> dict:
             else:
                 code_snippet = ""
 
-            original = flagged_by_id.get(f.refines_finding_id) if f.refines_finding_id else None
-            if original is None and f.line is not None:
-                # The LLM doesn't always set refines_finding_id even when it's clearly re-describing
-                # a scanner finding on the same line (e.g. restating "String-Built SQL Query" as its
-                # own "SQL Injection Vulnerability" finding) - falling back to an exact same-file/
-                # same-line match against a not-yet-refined flagged finding catches that case too,
-                # so it still merges instead of producing a fix-less duplicate row.
-                original = next((cand for cand in flagged if cand.line == f.line and cand.id not in refined_by_id), None)
             if original is not None:
                 # Same underlying issue as an existing finding: enrich it in place (keeping its
                 # original category/title/severity) instead of spawning a fix-less duplicate row.
@@ -358,7 +369,7 @@ def security_reasoning_node(state: GraphState) -> dict:
                 )
             )
 
-    updated_deterministic = [refined_by_id.get(f.id, f) for f in all_deterministic]
+    updated_deterministic = [refined_by_id.get(f.id, f) for f in all_deterministic if f.id not in dropped_ids]
 
     logger.info(
         "security reasoning agent: %d new finding(s), %d refined in-place, across %d file(s)",
@@ -411,3 +422,74 @@ def report_node(state: GraphState) -> dict:
         summary=summary,
     )
     return {"report": report}
+
+# --- MR Reasoning Node ---
+class MRFinding(BaseModel):
+    file: str
+    line: int | None = None
+    title: str
+    description: str
+    severity: Severity
+    category: Category
+    exploit_explanation: str | None = None
+    remediation_patch: str | None = None
+    code_fix: LLMCodeFix | None = None
+    risk_score: float = 0.5
+    confidence: float = 0.8
+
+class MRFindingsResult(BaseModel):
+    findings: list[MRFinding]
+
+_MR_SYSTEM_PROMPT = """You are a world-class code security auditor reviewing a Pull Request diff.
+Identify critical and high severity security vulnerabilities introduced in the patch.
+Do NOT flag vulnerabilities that exist in the unchanged context lines, and do NOT flag vulnerabilities that are actively being fixed by the Pull Request.
+Respond ONLY with a JSON array of finding objects matching the MRFindingsResult schema.
+Each finding must include:
+- category: one of [hardcoded_secret, owasp, logic_flaw, compliance, dependency_vuln, config_issue, coding_standard]
+- severity: one of [critical, high, medium, low, info]
+- title, description, file, line (approximate from patch if possible)
+- code_fix: LLMCodeFix object with original_snippet and replacement_snippet if you have a safe, exact code fix
+- risk_score: 0.0 to 1.0
+- confidence: 0.0 to 1.0
+"""
+
+def mr_reasoning_node(state: GraphState) -> dict:
+    mr_diff = state.get("mr_diff")
+    if not mr_diff:
+        return {"llm_findings": [], "used_llm": False}
+        
+    llm = get_llm().with_structured_output(MRFindingsResult)
+    human_content = f"Please audit this Pull Request Diff for security vulnerabilities:\n\n`\n{mr_diff}\n`"
+    
+    try:
+        result: MRFindingsResult = llm.invoke([("system", _MR_SYSTEM_PROMPT), ("human", human_content)])
+        
+        final_findings = []
+        for f in result.findings:
+            if f.code_fix and f.code_fix.original_snippet == f.code_fix.replacement_snippet:
+                logger.info("mr reasoning: dropping finding '%s' as false positive (identical snippet)", f.title)
+                continue
+            
+            fix = CodeFix(original_snippet=f.code_fix.original_snippet, replacement_snippet=f.code_fix.replacement_snippet) if f.code_fix else None
+            final_findings.append(
+                Finding(
+                    file=f.file,
+                    line=f.line,
+                    category=f.category,
+                    severity=f.severity,
+                    title=f.title,
+                    description=f.description,
+                    exploit_explanation=f.exploit_explanation,
+                    remediation_patch=f.remediation_patch,
+                    risk_score=f.risk_score,
+                    confidence=f.confidence,
+                    suggested_fix=fix,
+                    fix_status="suggested" if fix else "none",
+                    needs_llm=True,
+                    evidence=["Found by MR Security Reasoning Agent"]
+                )
+            )
+        return {"llm_findings": final_findings, "used_llm": True}
+    except Exception as e:
+        logger.error("MR reasoning LLM failed: %s", e)
+        return {"llm_findings": [], "used_llm": False}

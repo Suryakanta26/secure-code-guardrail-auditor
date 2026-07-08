@@ -32,6 +32,7 @@ def _empty_payload(status: str, message: str) -> dict:
         "prompt_cost": 0.0,
         "completion_cost": 0.0,
         "total_cost": 0.0,
+        "latency_p50": 0.0,
         "currency": "USD",
         "last_updated_at": now.isoformat(),
     }
@@ -116,6 +117,7 @@ def _aggregate_recent_runs(client: Client, start_time: datetime) -> dict:
         "prompt_cost": 0.0,
         "completion_cost": 0.0,
         "total_cost": 0.0,
+        "latency_p50": 0.0,
     }
 
     runs = client.list_runs(
@@ -142,11 +144,19 @@ def _aggregate_recent_runs(client: Client, start_time: datetime) -> dict:
         totals["prompt_cost"] += _run_number(run, "prompt_cost", "input_cost")
         totals["completion_cost"] += _run_number(run, "completion_cost", "output_cost")
         totals["total_cost"] += _run_number(run, "total_cost")
+        if run.start_time and run.end_time:
+            totals["latency_p50"] += (run.end_time - run.start_time).total_seconds()
+
 
     if not totals["total_tokens"]:
         totals["total_tokens"] = totals["prompt_tokens"] + totals["completion_tokens"]
-    if not totals["total_cost"]:
+    if not totals["total_cost"] and (totals["prompt_tokens"] > 0 or totals["completion_tokens"] > 0):
+        totals["prompt_cost"] = (totals["prompt_tokens"] / 1_000_000.0) * settings.llm_input_cost_per_million
+        totals["completion_cost"] = (totals["completion_tokens"] / 1_000_000.0) * settings.llm_output_cost_per_million
         totals["total_cost"] = totals["prompt_cost"] + totals["completion_cost"]
+    
+    if totals["llm_calls"] > 0:
+        totals["latency_p50"] = totals["latency_p50"] / totals["llm_calls"]
 
     return totals
 
@@ -171,6 +181,7 @@ def get_finops_summary() -> dict:
             "prompt_cost": 0.0,
             "completion_cost": 0.0,
             "total_cost": 0.0,
+            "latency_p50": 0.0,
         }
 
         try:
@@ -188,6 +199,7 @@ def get_finops_summary() -> dict:
                 "prompt_cost": _first_number(stats, {"prompt_cost", "input_cost"}),
                 "completion_cost": _first_number(stats, {"completion_cost", "output_cost"}),
                 "total_cost": _first_number(stats, {"total_cost"}),
+                "latency_p50": _first_number(stats, {"latency_p50", "median_execution_time"}),
             }
         except Exception as exc:
             logger.warning("langsmith finops: stats endpoint unavailable, trying recent runs: %s", exc)
@@ -201,7 +213,9 @@ def get_finops_summary() -> dict:
 
         if not totals["total_tokens"]:
             totals["total_tokens"] = totals["prompt_tokens"] + totals["completion_tokens"]
-        if not totals["total_cost"]:
+        if not totals["total_cost"] and (totals["prompt_tokens"] > 0 or totals["completion_tokens"] > 0):
+            totals["prompt_cost"] = (totals["prompt_tokens"] / 1_000_000.0) * settings.llm_input_cost_per_million
+            totals["completion_cost"] = (totals["completion_tokens"] / 1_000_000.0) * settings.llm_output_cost_per_million
             totals["total_cost"] = totals["prompt_cost"] + totals["completion_cost"]
 
         return _set_cached_payload({
@@ -218,6 +232,7 @@ def get_finops_summary() -> dict:
             "prompt_cost": round(float(totals["prompt_cost"]), 6),
             "completion_cost": round(float(totals["completion_cost"]), 6),
             "total_cost": round(float(totals["total_cost"]), 6),
+            "latency_p50": round(float(totals["latency_p50"]), 3),
             "currency": "USD",
             "last_updated_at": now.isoformat(),
         }, now)

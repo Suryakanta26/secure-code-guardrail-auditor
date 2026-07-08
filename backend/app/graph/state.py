@@ -18,3 +18,5 @@ class GraphState(TypedDict, total=False):
     used_llm: bool
     compliance_status: list[ComplianceStatus]
     report: ScanReport
+    is_mr_scan: bool
+    mr_diff: str

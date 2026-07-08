@@ -552,6 +552,11 @@ h2 {
   background: rgba(57, 217, 138, 0.1);
 }
 
+.failed {
+  color: #ff5f5a;
+  background: rgba(255, 95, 90, 0.1);
+}
+
 .running {
   color: #a69bff;
   background: rgba(139, 124, 255, 0.1);
@@ -889,7 +894,7 @@ mark.failed { background: rgba(239, 68, 68, 0.62); }
 
 .finops-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -1935,6 +1940,11 @@ th {
   background: rgba(16, 185, 129, 0.12);
 }
 
+.light-theme .failed {
+  color: #dc2626;
+  background: rgba(239, 68, 68, 0.12);
+}
+
 .light-theme .running {
   color: #4f46e5;
   background: rgba(79, 70, 229, 0.1);
@@ -2495,4 +2505,287 @@ input[type="file"] {
   .admin-form-panel {
     position: static;
   }
+}
+/* Scatter Plot */
+.scatter-plot-container {
+  padding: 1rem;
+  height: 400px;
+  position: relative;
+}
+
+.scatter-plot {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  background: rgba(12, 19, 31, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+}
+
+.scatter-grid {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+
+.scatter-grid::before {
+  content: '';
+  position: absolute;
+  top: 50%; left: 0; right: 0;
+  border-top: 1px dashed rgba(255, 255, 255, 0.1);
+}
+
+.scatter-grid::after {
+  content: '';
+  position: absolute;
+  top: 0; bottom: 0; left: 50%;
+  border-left: 1px dashed rgba(255, 255, 255, 0.1);
+}
+
+.quadrant {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  color: #94a3b8;
+  opacity: 0.3;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.scatter-axes .y-axis-label {
+  position: absolute;
+  left: -20px;
+  top: 50%;
+  transform: translateY(-50%) rotate(-90deg);
+  font-size: 0.75rem;
+  color: #94a3b8;
+  white-space: nowrap;
+}
+
+.scatter-axes .x-axis-label {
+  position: absolute;
+  bottom: -25px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
+.scatter-dot {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  transform: translate(-50%, 50%);
+  transition: all 0.2s;
+  cursor: pointer;
+  z-index: 10;
+}
+
+.scatter-dot:hover {
+  transform: translate(-50%, 50%) scale(1.5);
+  z-index: 20;
+}
+
+.scatter-dot.critical { background: #f87171; box-shadow: 0 0 10px rgba(248, 113, 113, 0.6); }
+.scatter-dot.high { background: #fb923c; box-shadow: 0 0 8px rgba(251, 146, 60, 0.4); }
+.scatter-dot.medium { background: #facc15; box-shadow: 0 0 6px rgba(250, 204, 21, 0.4); }
+.scatter-dot.low { background: #60a5fa; }
+.scatter-dot.info { background: #a7b5c8; }
+
+.scatter-dot::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%) translateY(-10px);
+  background: #111b27;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  color: #f8fafc;
+  white-space: pre-wrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s, transform 0.2s;
+  min-width: 150px;
+  text-align: left;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+}
+
+.scatter-dot:hover::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(-5px);
+}
+/* Compliance Radial Gauge */
+.compliance-panel {
+  min-height: 294px;
+}
+
+.compliance-layout {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 2rem;
+  padding: 1rem;
+}
+
+.compliance-gauge-wrapper {
+  position: relative;
+  width: 150px;
+  height: 150px;
+  flex-shrink: 0;
+}
+
+.compliance-gauge {
+  transform: rotate(-90deg);
+  width: 100%;
+  height: 100%;
+}
+
+.gauge-bg {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.1);
+  stroke-width: 12;
+}
+
+.gauge-fill {
+  fill: none;
+  stroke: var(--success-color, #22c55e);
+  stroke-width: 12;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 1.5s ease-out;
+}
+
+.gauge-text {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+}
+
+.gauge-text strong {
+  font-size: 28px;
+  color: #f8fafc;
+  display: block;
+}
+
+.compliance-breakdown-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  flex-grow: 1;
+}
+
+.breakdown-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.fw-name {
+  font-size: 0.875rem;
+  color: #e2e8f0;
+}
+
+.fw-status {
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.2rem 0.5rem;
+  border-radius: 99px;
+  text-transform: uppercase;
+}
+
+.fw-pass {
+  background: rgba(34, 197, 94, 0.2);
+  color: #4ade80;
+}
+
+.fw-fail {
+  background: rgba(248, 113, 113, 0.2);
+  color: #f87171;
+}
+/* Skeleton Loader Animation */
+@keyframes skeleton-pulse {
+  0% {
+    background-color: rgba(255, 255, 255, 0.05);
+    color: transparent;
+  }
+  50% {
+    background-color: rgba(255, 255, 255, 0.15);
+    color: transparent;
+  }
+  100% {
+    background-color: rgba(255, 255, 255, 0.05);
+    color: transparent;
+  }
+}
+
+.skeleton-text {
+  display: inline-block;
+  border-radius: 4px;
+  animation: skeleton-pulse 1.5s ease-in-out infinite;
+  user-select: none;
+  min-width: 40px;
+}
+
+.scan-type-toggle {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+  padding: 0.25rem;
+  background: var(--surface-2);
+  border-radius: 8px;
+}
+
+.scan-type-toggle button {
+  flex: 1;
+  padding: 0.75rem;
+  border: none;
+  background: transparent;
+  color: var(--text-2);
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.scan-type-toggle button:hover {
+  color: var(--text-1);
+  background: var(--surface-3);
+}
+
+.scan-type-toggle button.active {
+  background: var(--primary);
+  color: white;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+.repo-select {
+  width: 100%;
+  max-width: 100%;
+  height: 42px;
+  border: 1px solid rgba(148, 163, 184, 0.26);
+  border-radius: 8px;
+  outline: 0;
+  color: #f8fafc;
+  background: rgba(8, 17, 31, 0.55);
+  font: inherit;
+  padding: 0 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.light-theme .repo-select {
+  color: #172033;
+  background: rgba(255, 255, 255, 0.78);
+  border-color: rgba(71, 85, 105, 0.22);
 }
